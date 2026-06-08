@@ -102,7 +102,8 @@ const clang::VarDecl* Analyzer::variable_assigned_from_call(
         }
         const clang::DynTypedNode& parent = parents[0];
 
-        if (const auto* binary = parent.get<clang::BinaryOperator>()) {
+        if (const auto* binary = parent.get<clang::BinaryOperator>();
+            binary != nullptr && binary->isAssignmentOp()) {
             if (binary->getOpcode() != clang::BO_Assign ||
                 binary->getRHS() != expression_from(current)) {
                 return nullptr;
