@@ -25,26 +25,42 @@ bool is_transparent_wrapper(const clang::Expr* expression) {
         clang::CXXBindTemporaryExpr>(expression);
 }
 
-bool carries_if_condition(const clang::Expr* expression) {
-    if (is_transparent_wrapper(expression)) {
+const clang::Expr* expression_from(const clang::DynTypedNode& node) {
+    return node.get<clang::Expr>();
+}
+
+bool is_comma_rhs(
+    const clang::Expr* parent,
+    const clang::Expr* child) {
+    const auto* binary = llvm::dyn_cast_or_null<clang::BinaryOperator>(parent);
+    return binary != nullptr && binary->getOpcode() == clang::BO_Comma &&
+           binary->getRHS() == child;
+}
+
+bool propagates_value(
+    const clang::Expr* parent,
+    const clang::Expr* child) {
+    return is_transparent_wrapper(parent) || is_comma_rhs(parent, child);
+}
+
+bool carries_if_condition(
+    const clang::Expr* parent,
+    const clang::Expr* child) {
+    if (propagates_value(parent, child)) {
         return true;
     }
 
-    if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(expression)) {
+    if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(parent)) {
         return unary->getOpcode() == clang::UO_LNot;
     }
 
-    if (const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(expression)) {
+    if (const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(parent)) {
         return binary->isComparisonOp() ||
                binary->getOpcode() == clang::BO_LAnd ||
                binary->getOpcode() == clang::BO_LOr;
     }
 
     return false;
-}
-
-const clang::Expr* expression_from(const clang::DynTypedNode& node) {
-    return node.get<clang::Expr>();
 }
 
 } // namespace
@@ -65,8 +81,10 @@ const clang::VarDecl* Analyzer::variable_initialized_by_call(
                        : nullptr;
         }
 
+        const clang::Expr* child = expression_from(current);
         const clang::Expr* expression = expression_from(parent);
-        if (expression == nullptr || !is_transparent_wrapper(expression)) {
+        if (child == nullptr || expression == nullptr ||
+            !propagates_value(expression, child)) {
             return nullptr;
         }
         current = parent;
@@ -85,15 +103,17 @@ const clang::VarDecl* Analyzer::variable_assigned_from_call(
         const clang::DynTypedNode& parent = parents[0];
 
         if (const auto* binary = parent.get<clang::BinaryOperator>()) {
-            if (!binary->isAssignmentOp() ||
+            if (binary->getOpcode() != clang::BO_Assign ||
                 binary->getRHS() != expression_from(current)) {
                 return nullptr;
             }
             return referenced_variable(binary->getLHS());
         }
 
+        const clang::Expr* child = expression_from(current);
         const clang::Expr* expression = expression_from(parent);
-        if (expression == nullptr || !is_transparent_wrapper(expression)) {
+        if (child == nullptr || expression == nullptr ||
+            !propagates_value(expression, child)) {
             return nullptr;
         }
         current = parent;
@@ -117,8 +137,10 @@ const clang::SwitchStmt* Analyzer::enclosing_direct_switch(
                        : nullptr;
         }
 
+        const clang::Expr* child = expression_from(current);
         const clang::Expr* expression = expression_from(parent);
-        if (expression == nullptr || !is_transparent_wrapper(expression)) {
+        if (child == nullptr || expression == nullptr ||
+            !propagates_value(expression, child)) {
             return nullptr;
         }
         current = parent;
@@ -142,8 +164,10 @@ const clang::IfStmt* Analyzer::enclosing_direct_if(
                        : nullptr;
         }
 
+        const clang::Expr* child = expression_from(current);
         const clang::Expr* expression = expression_from(parent);
-        if (expression == nullptr || !carries_if_condition(expression)) {
+        if (child == nullptr || expression == nullptr ||
+            !carries_if_condition(expression, child)) {
             return nullptr;
         }
         current = parent;
@@ -164,8 +188,10 @@ bool Analyzer::call_is_forwarded(const clang::CallExpr* call) const {
             return statement->getRetValue() == expression_from(current);
         }
 
+        const clang::Expr* child = expression_from(current);
         const clang::Expr* expression = expression_from(parent);
-        if (expression == nullptr || !is_transparent_wrapper(expression)) {
+        if (child == nullptr || expression == nullptr ||
+            !propagates_value(expression, child)) {
             return false;
         }
         current = parent;
@@ -199,8 +225,10 @@ bool Analyzer::call_is_discarded_expression(const clang::CallExpr* call) const {
             return false;
         }
 
+        const clang::Expr* child = expression_from(current);
         const clang::Expr* expression = expression_from(parent);
-        if (expression == nullptr || !is_transparent_wrapper(expression)) {
+        if (child == nullptr || expression == nullptr ||
+            !is_transparent_wrapper(expression)) {
             return false;
         }
         current = parent;
