@@ -1,4 +1,5 @@
 #include <returnguard/Frontend.hpp>
+#include <returnguard/Options.hpp>
 
 #include "internal/Analyzer.hpp"
 
@@ -30,6 +31,7 @@ public:
     std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(
         clang::CompilerInstance& compiler,
         llvm::StringRef) override {
+        compiler.getDiagnosticOpts().ShowColors = options().color;
         return std::make_unique<Consumer>(compiler.getASTContext());
     }
 };
