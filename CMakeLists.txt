@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(returnguard VERSION 0.3.0 LANGUAGES CXX)
+project(returnguard VERSION 0.3.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,7 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(RETURNGUARD_WARNINGS_AS_ERRORS "Treat ReturnGuard warnings as errors" OFF)
-option(RETURNGUARD_BUILD_TESTS "Register smoke tests with CTest" ON)
+option(RETURNGUARD_BUILD_TESTS "Build and register ReturnGuard tests" ON)
 
 find_package(LLVM REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
@@ -41,9 +41,11 @@ target_include_directories(returnguard
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    SYSTEM PRIVATE
-        ${LLVM_INCLUDE_DIRS}
-        ${CLANG_INCLUDE_DIRS}
+)
+
+target_include_directories(returnguard SYSTEM PRIVATE
+    ${LLVM_INCLUDE_DIRS}
+    ${CLANG_INCLUDE_DIRS}
 )
 
 target_compile_definitions(returnguard PRIVATE ${LLVM_DEFINITIONS})
