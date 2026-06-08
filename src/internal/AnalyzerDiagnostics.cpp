@@ -1,4 +1,5 @@
 #include "Analyzer.hpp"
+
 #include "DomainUtils.hpp"
 
 #include <clang/AST/Decl.h>
@@ -23,17 +24,20 @@ std::string Analyzer::function_name(const clang::CallExpr* call) const {
     return text.empty() ? "<indirect function>" : text;
 }
 
-void Analyzer::emit(const clang::CallExpr* call,
-                    llvm::StringRef message,
-                    llvm::StringRef note) const {
+void Analyzer::emit(
+    const clang::CallExpr* call,
+    llvm::StringRef message,
+    llvm::StringRef note) const {
     clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
-    const unsigned warning_id = diagnostics.getCustomDiagID(
-        clang::DiagnosticsEngine::Warning, "returnguard: %0");
-    diagnostics.Report(call->getExprLoc(), warning_id) << message;
+    const unsigned diagnostic_id = diagnostics.getCustomDiagID(
+        clang::DiagnosticsEngine::Warning,
+        "returnguard: %0");
+    diagnostics.Report(call->getExprLoc(), diagnostic_id) << message;
 
     if (!note.empty()) {
         const unsigned note_id = diagnostics.getCustomDiagID(
-            clang::DiagnosticsEngine::Note, "returnguard: %0");
+            clang::DiagnosticsEngine::Note,
+            "returnguard: %0");
         diagnostics.Report(call->getExprLoc(), note_id) << note;
     }
 }

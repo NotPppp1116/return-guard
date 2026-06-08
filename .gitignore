@@ -1,6 +1,6 @@
-build/
+/build/
+/cmake-build-*/
 compile_commands.json
+*.profraw
+*.profdata
 .cache/
-*.o
-*.so
-*.a
