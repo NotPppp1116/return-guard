@@ -1,5 +1,6 @@
 #include "Analyzer.hpp"
 
+#include "DirectIf.hpp"
 #include "HandlerFinder.hpp"
 #include "IfChain.hpp"
 
@@ -80,15 +81,7 @@ CheckResult Analyzer::classify_call(
     }
 
     if (const clang::IfStmt* statement = enclosing_direct_if(call)) {
-        if (has_final_else(statement)) {
-            return {.kind = HandlingKind::ExhaustivelyChecked};
-        }
-        return {
-            .kind = HandlingKind::PartiallyChecked,
-            .missing = domain.finite ? domain.values
-                                     : std::vector<DomainValue>{},
-            .detail = "direct conditional has no final else",
-        };
+        return analyze_direct_if(statement, call, domain, context_);
     }
 
     if (const clang::VarDecl* variable = variable_initialized_by_call(call)) {
