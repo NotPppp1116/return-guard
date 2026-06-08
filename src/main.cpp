@@ -46,6 +46,12 @@ llvm::cl::opt<bool> explicit_void_is_handled(
     llvm::cl::init(true),
     llvm::cl::cat(category));
 
+llvm::cl::opt<bool> fail_on_diagnostics(
+    "fail-on-diagnostics",
+    llvm::cl::desc("Emit ReturnGuard findings as errors and return a nonzero status"),
+    llvm::cl::init(false),
+    llvm::cl::cat(category));
+
 llvm::cl::opt<bool> no_color(
     "no-color",
     llvm::cl::desc("Disable colored diagnostics"),
@@ -90,6 +96,7 @@ int main(int argc, const char** argv) {
         .include_operators = include_operators,
         .include_reference_returns = include_reference_returns,
         .explicit_void_is_handled = explicit_void_is_handled,
+        .fail_on_diagnostics = fail_on_diagnostics,
         .color = !no_color,
     });
 
