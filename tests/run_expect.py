@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import pathlib
 import subprocess
 import sys
 
@@ -15,6 +14,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include", required=True)
     parser.add_argument("--mode", required=True)
     parser.add_argument("--warning-count", type=int, required=True)
+    parser.add_argument("--expected-exit-code", type=int, default=0)
+    parser.add_argument(
+        "--diagnostic-kind",
+        choices=("warning", "error"),
+        default="warning",
+    )
+    parser.add_argument("--fail-on-diagnostics", action="store_true")
     parser.add_argument("--expect", action="append", default=[])
     parser.add_argument("--reject", action="append", default=[])
     return parser.parse_args()
@@ -25,11 +31,19 @@ def main() -> int:
     command = [
         args.tool,
         f"--mode={args.mode}",
-        args.source,
-        "--",
-        "-std=c17",
-        f"-I{args.include}",
+        "--no-color",
     ]
+    if args.fail_on_diagnostics:
+        command.append("--fail-on-diagnostics")
+
+    command.extend(
+        [
+            args.source,
+            "--",
+            "-std=c17",
+            f"-I{args.include}",
+        ]
+    )
 
     result = subprocess.run(
         command,
@@ -40,19 +54,23 @@ def main() -> int:
     )
     output = result.stdout
 
-    if result.returncode != 0:
+    if result.returncode != args.expected_exit_code:
         print(output, end="")
         print(
-            f"ReturnGuard exited with {result.returncode}; command: {' '.join(command)}",
+            "expected ReturnGuard to exit with "
+            f"{args.expected_exit_code}, got {result.returncode}; "
+            f"command: {' '.join(command)}",
             file=sys.stderr,
         )
         return 1
 
-    warning_count = output.count("warning: returnguard:")
-    if warning_count != args.warning_count:
+    marker = f"{args.diagnostic_kind}: returnguard:"
+    diagnostic_count = output.count(marker)
+    if diagnostic_count != args.warning_count:
         print(output, end="")
         print(
-            f"expected {args.warning_count} ReturnGuard warning(s), got {warning_count}",
+            f"expected {args.warning_count} ReturnGuard {args.diagnostic_kind}(s), "
+            f"got {diagnostic_count}",
             file=sys.stderr,
         )
         return 1
