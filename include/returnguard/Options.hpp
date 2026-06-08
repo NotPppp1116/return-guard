@@ -14,6 +14,7 @@ struct Options {
     bool include_operators = false;
     bool include_reference_returns = false;
     bool explicit_void_is_handled = true;
+    bool fail_on_diagnostics = false;
     bool color = true;
 };
 
