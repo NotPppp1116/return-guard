@@ -13,8 +13,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang llvm-dev libclang-dev cmake ninja-build
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm-dev libclang-dev cmake ninja-build
 
       - name: Configure
         run: |
@@ -31,3 +31,11 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Upload failing CTest log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-last-log
+          path: build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore

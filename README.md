@@ -12,7 +12,8 @@ API is C++, but the analyzed source is ordinary C (`.c` and `.h`).
 - Calls returning any non-`void` type.
 - `_Bool` and enum return domains.
 - Finite integer domains inferred from visible function bodies.
-- Finite integer domains supplied through `annotate` attributes.
+- Finite integer domains supplied through `annotate` attributes on any function
+  redeclaration.
 - Direct `switch (function())` and `if (function())` checks.
 - Results stored in a local variable and checked later.
 - `if`/`else if` chains using `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`,
@@ -73,6 +74,23 @@ Only reports completely ignored results.
 returnguard --mode=ignored-only file.c -- -std=c17
 ```
 
+## CI and diagnostic options
+
+By default, ReturnGuard findings are warnings and the tool can still exit
+successfully. Use `--fail-on-diagnostics` when a finding should fail CI:
+
+```sh
+returnguard --mode=strict --fail-on-diagnostics \
+    -p build src/main.c
+```
+
+This promotes ReturnGuard findings to Clang errors, causing the tool to return a
+nonzero status. Use `--no-color` for stable plain-text logs:
+
+```sh
+returnguard --no-color file.c -- -std=c17
+```
+
 ## Build on Arch Linux
 
 Install LLVM, Clang, CMake, and Ninja:
@@ -89,7 +107,7 @@ cmake -S . -B build -G Ninja \
 cmake --build build
 ```
 
-Run the smoke tests:
+Run the regression tests:
 
 ```sh
 ctest --test-dir build --output-on-failure
@@ -142,7 +160,10 @@ RG_VALUES(1, 4, 32)
 int read_status(void);
 ```
 
-ReturnGuard reads the annotation as the set `{1, 4, 32}`.
+ReturnGuard reads the annotation as the set `{1, 4, 32}`. The annotation may be
+placed on any declaration in the function's redeclaration chain, so it can live
+in a public header while the definition remains unchanged. Signed values and an
+explicit leading `+` are accepted.
 
 For enums, no annotation is needed:
 
