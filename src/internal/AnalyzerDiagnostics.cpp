@@ -2,6 +2,8 @@
 
 #include "DomainUtils.hpp"
 
+#include <returnguard/Options.hpp>
+
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
 #include <clang/Basic/Diagnostic.h>
@@ -29,16 +31,26 @@ void Analyzer::emit(
     llvm::StringRef message,
     llvm::StringRef note) const {
     clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
+    const clang::DiagnosticsEngine::Level level =
+        returnguard::options().fail_on_diagnostics
+            ? clang::DiagnosticsEngine::Error
+            : clang::DiagnosticsEngine::Warning;
+
+    clang::SourceLocation location = user_file_location(call->getExprLoc());
+    if (location.isInvalid()) {
+        location = call->getExprLoc();
+    }
+
     const unsigned diagnostic_id = diagnostics.getCustomDiagID(
-        clang::DiagnosticsEngine::Warning,
+        level,
         "returnguard: %0");
-    diagnostics.Report(call->getExprLoc(), diagnostic_id) << message;
+    diagnostics.Report(location, diagnostic_id) << message;
 
     if (!note.empty()) {
         const unsigned note_id = diagnostics.getCustomDiagID(
             clang::DiagnosticsEngine::Note,
             "returnguard: %0");
-        diagnostics.Report(call->getExprLoc(), note_id) << note;
+        diagnostics.Report(location, note_id) << note;
     }
 }
 
