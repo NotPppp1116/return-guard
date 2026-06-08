@@ -5,6 +5,7 @@
 namespace returnguard::internal {
 
 ReturnCollector::ReturnCollector(
+    const clang::ASTContext&,
     std::vector<const clang::Expr*>& expressions)
     : expressions_(expressions) {}
 
