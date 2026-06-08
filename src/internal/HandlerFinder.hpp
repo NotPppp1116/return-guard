@@ -8,9 +8,11 @@
 #include <vector>
 
 namespace clang {
+class BinaryOperator;
 class DeclRefExpr;
 class IfStmt;
 class SwitchStmt;
+class UnaryOperator;
 class VarDecl;
 }
 
@@ -28,6 +30,8 @@ public:
 
     bool VisitSwitchStmt(clang::SwitchStmt* statement);
     bool VisitIfStmt(clang::IfStmt* statement);
+    bool VisitBinaryOperator(clang::BinaryOperator* expression);
+    bool VisitUnaryOperator(clang::UnaryOperator* expression);
     bool VisitDeclRefExpr(clang::DeclRefExpr* reference);
 
     [[nodiscard]] bool has_any_use() const;
@@ -47,6 +51,7 @@ private:
     bool has_any_use_ = false;
     bool has_any_check_ = false;
     bool exhaustive_ = false;
+    bool invalidated_ = false;
     std::vector<bool> covered_;
 };
 

@@ -116,7 +116,7 @@ void HandlerFinder::mark_if_chain(const clang::IfStmt* statement) {
 }
 
 bool HandlerFinder::VisitSwitchStmt(clang::SwitchStmt* statement) {
-    if (!occurs_after(statement->getSwitchLoc())) {
+    if (invalidated_ || !occurs_after(statement->getSwitchLoc())) {
         return true;
     }
     if (!expression_references_variable(statement->getCond(), variable_)) {
@@ -127,7 +127,7 @@ bool HandlerFinder::VisitSwitchStmt(clang::SwitchStmt* statement) {
 }
 
 bool HandlerFinder::VisitIfStmt(clang::IfStmt* statement) {
-    if (!occurs_after(statement->getIfLoc())) {
+    if (invalidated_ || !occurs_after(statement->getIfLoc())) {
         return true;
     }
     if (!expression_references_variable(statement->getCond(), variable_)) {
@@ -137,8 +137,43 @@ bool HandlerFinder::VisitIfStmt(clang::IfStmt* statement) {
     return true;
 }
 
+bool HandlerFinder::VisitBinaryOperator(clang::BinaryOperator* expression) {
+    if (invalidated_ || !expression->isAssignmentOp() ||
+        !occurs_after(expression->getOperatorLoc()) ||
+        referenced_variable(expression->getLHS()) != variable_) {
+        return true;
+    }
+
+    if (expression->getOpcode() != clang::BO_Assign ||
+        expression_references_variable(expression->getRHS(), variable_)) {
+        has_any_use_ = true;
+    }
+    invalidated_ = true;
+    return true;
+}
+
+bool HandlerFinder::VisitUnaryOperator(clang::UnaryOperator* expression) {
+    if (invalidated_ || !occurs_after(expression->getOperatorLoc()) ||
+        referenced_variable(expression->getSubExpr()) != variable_) {
+        return true;
+    }
+
+    switch (expression->getOpcode()) {
+    case clang::UO_PreInc:
+    case clang::UO_PreDec:
+    case clang::UO_PostInc:
+    case clang::UO_PostDec:
+        has_any_use_ = true;
+        invalidated_ = true;
+        break;
+    default:
+        break;
+    }
+    return true;
+}
+
 bool HandlerFinder::VisitDeclRefExpr(clang::DeclRefExpr* reference) {
-    if (reference->getDecl() == variable_ &&
+    if (!invalidated_ && reference->getDecl() == variable_ &&
         occurs_after(reference->getExprLoc())) {
         has_any_use_ = true;
     }

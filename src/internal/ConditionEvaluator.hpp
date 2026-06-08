@@ -24,9 +24,18 @@ namespace returnguard::internal {
     const clang::Expr* expression,
     const clang::VarDecl* target,
     const clang::ASTContext& context);
+[[nodiscard]] SymbolicInteger symbolic_integer(
+    const clang::Expr* expression,
+    const clang::Expr* target,
+    const clang::ASTContext& context);
 [[nodiscard]] Truth evaluate_condition_for_value(
     const clang::Expr* expression,
     const clang::VarDecl* target,
+    const llvm::APSInt& target_value,
+    const clang::ASTContext& context);
+[[nodiscard]] Truth evaluate_condition_for_value(
+    const clang::Expr* expression,
+    const clang::Expr* target,
     const llvm::APSInt& target_value,
     const clang::ASTContext& context);
 

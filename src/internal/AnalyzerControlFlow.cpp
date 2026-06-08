@@ -2,6 +2,7 @@
 
 #include "AstUtils.hpp"
 #include "ConditionEvaluator.hpp"
+#include "DirectIf.hpp"
 #include "DomainUtils.hpp"
 #include "IfChain.hpp"
 
@@ -104,6 +105,46 @@ CheckResult Analyzer::analyze_if_chain(
         for (const clang::IfStmt* current : chain) {
             if (evaluate_condition_for_value(
                     current->getCond(), variable, value.value, context_) ==
+                Truth::True) {
+                handled = true;
+                break;
+            }
+        }
+        if (!handled) {
+            result.missing.push_back(value);
+        }
+    }
+
+    if (result.missing.empty()) {
+        result.kind = HandlingKind::ExhaustivelyChecked;
+    }
+    return result;
+}
+
+CheckResult analyze_direct_if(
+    const clang::IfStmt* statement,
+    const clang::Expr* target,
+    const Domain& domain,
+    const clang::ASTContext& context) {
+    CheckResult result;
+    result.kind = HandlingKind::PartiallyChecked;
+
+    if (has_final_else(statement)) {
+        result.kind = HandlingKind::ExhaustivelyChecked;
+        return result;
+    }
+
+    if (!domain.finite || target == nullptr) {
+        result.detail = "direct conditional checks have no final else";
+        return result;
+    }
+
+    const std::vector<const clang::IfStmt*> chain = if_chain(statement);
+    for (const DomainValue& value : domain.values) {
+        bool handled = false;
+        for (const clang::IfStmt* current : chain) {
+            if (evaluate_condition_for_value(
+                    current->getCond(), target, value.value, context) ==
                 Truth::True) {
                 handled = true;
                 break;

@@ -1,13 +1,11 @@
 #pragma once
 
 #include <clang/AST/RecursiveASTVisitor.h>
-
 #include <vector>
 
 namespace clang {
 class ASTContext;
 class Expr;
-class LambdaExpr;
 class ReturnStmt;
 }
 
@@ -19,11 +17,10 @@ public:
         const clang::ASTContext& context,
         std::vector<const clang::Expr*>& expressions);
 
+    bool shouldVisitLambdaBody() const;
     bool VisitReturnStmt(clang::ReturnStmt* statement);
-    bool TraverseLambdaExpr(clang::LambdaExpr* expression);
 
 private:
-    const clang::ASTContext& context_;
     std::vector<const clang::Expr*>& expressions_;
 };
 
