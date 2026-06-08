@@ -27,6 +27,7 @@ add_returnguard_test(returnguard.reassignment reassignment.c practical 1 "stored
 add_returnguard_test(returnguard.nested_calls nested_calls.c strict 2 "consumed but not verified")
 add_returnguard_test(returnguard.nested_storage_and_switch nested_storage_and_switch.c strict 2 "consumed but not verified")
 add_returnguard_test(returnguard.comma_discard comma_discard.c ignored-only 1 "is not handled")
+add_returnguard_test(returnguard.annotation_redeclaration annotation_redeclaration.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.switches switches.c strict 1 "open-ended")
 add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value of 'annotated_status'")
 add_returnguard_test(
