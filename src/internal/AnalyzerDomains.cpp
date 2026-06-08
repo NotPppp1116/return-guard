@@ -64,45 +64,59 @@ Domain Analyzer::annotation_domain(const clang::FunctionDecl* function) const {
     Domain domain;
     domain.type_name = function->getReturnType().getAsString();
 
-    for (const clang::AnnotateAttr* attribute :
-         function->specific_attrs<clang::AnnotateAttr>()) {
-        llvm::StringRef annotation = attribute->getAnnotation();
-        constexpr llvm::StringLiteral prefix("returnguard.values:");
-        if (!annotation.consume_front(prefix)) {
-            continue;
-        }
-
-        domain.finite = true;
-        domain.inferred_from_body = false;
-
-        while (!annotation.empty()) {
-            const auto split = annotation.split(',');
-            llvm::StringRef token = split.first.trim();
-            annotation = split.second;
-            if (token.empty()) {
+    bool found_annotation = false;
+    for (const clang::FunctionDecl* redeclaration : function->redecls()) {
+        for (const clang::AnnotateAttr* attribute :
+             redeclaration->specific_attrs<clang::AnnotateAttr>()) {
+            llvm::StringRef annotation = attribute->getAnnotation();
+            constexpr llvm::StringLiteral prefix("returnguard.values:");
+            if (!annotation.consume_front(prefix)) {
                 continue;
             }
 
-            const bool negative = token.consume_front("-");
-            std::uint64_t magnitude = 0;
-            if (token.getAsInteger(0, magnitude)) {
+            found_annotation = true;
+            bool found_value = false;
+
+            while (!annotation.empty()) {
+                const auto split = annotation.split(',');
+                llvm::StringRef token = split.first.trim();
+                annotation = split.second;
+                if (token.empty()) {
+                    continue;
+                }
+
+                found_value = true;
+                const bool negative = token.consume_front("-");
+                (void)token.consume_front("+");
+
+                std::uint64_t magnitude = 0;
+                if (token.empty() || token.getAsInteger(0, magnitude)) {
+                    domain.finite = false;
+                    domain.values.clear();
+                    return domain;
+                }
+
+                llvm::APInt raw(64U, magnitude);
+                if (negative) {
+                    raw = -raw;
+                }
+                add_domain_value(
+                    domain,
+                    llvm::APSInt(raw, false),
+                    negative ? "-" + std::to_string(magnitude)
+                             : std::to_string(magnitude));
+            }
+
+            if (!found_value) {
                 domain.finite = false;
                 domain.values.clear();
                 return domain;
             }
-
-            llvm::APInt raw(64U, magnitude);
-            if (negative) {
-                raw = -raw;
-            }
-            add_domain_value(
-                domain,
-                llvm::APSInt(raw, false),
-                negative ? "-" + std::to_string(magnitude)
-                         : std::to_string(magnitude));
         }
-        return domain;
     }
+
+    domain.finite = found_annotation && !domain.values.empty();
+    domain.inferred_from_body = false;
     return domain;
 }
 
