@@ -15,17 +15,11 @@ function(add_returnguard_test name source mode warning_count expected_text)
     )
 endfunction()
 
-add_returnguard_test(
-    returnguard.macros macros.c practical 1 "missing 32")
-add_returnguard_test(
-    returnguard.enums enums.c practical 1 "missing STATUS_DENIED")
-add_returnguard_test(
-    returnguard.integers integers.c strict 1 "missing 32")
-add_returnguard_test(
-    returnguard.if_chains if_chains.c practical 1 "missing 32")
-add_returnguard_test(
-    returnguard.direct_if direct_if.c practical 1 "missing 4, 32")
-add_returnguard_test(
-    returnguard.switches switches.c strict 1 "open-ended")
-add_returnguard_test(
-    returnguard.ignored ignored.c ignored-only 1 "return value of 'annotated_status'")
+add_returnguard_test(returnguard.macros macros.c practical 1 "missing 32")
+add_returnguard_test(returnguard.enums enums.c practical 1 "missing STATUS_DENIED")
+add_returnguard_test(returnguard.integers integers.c strict 1 "missing 32")
+add_returnguard_test(returnguard.if_chains if_chains.c practical 1 "missing 32")
+add_returnguard_test(returnguard.direct_if direct_if.c practical 1 "missing 4, 32")
+add_returnguard_test(returnguard.reassignment reassignment.c practical 1 "stored but never used")
+add_returnguard_test(returnguard.switches switches.c strict 1 "open-ended")
+add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value of 'annotated_status'")
