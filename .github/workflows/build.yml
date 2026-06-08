@@ -18,8 +18,13 @@ jobs:
 
       - name: Configure
         run: |
+          LLVM_CMAKE_DIR="$(llvm-config --cmakedir)"
+          CLANG_CMAKE_DIR="$(dirname "${LLVM_CMAKE_DIR}")/clang"
+
           cmake -S . -B build -G Ninja \
-            -DCMAKE_CXX_COMPILER=clang++
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DLLVM_DIR="${LLVM_CMAKE_DIR}" \
+            -DClang_DIR="${CLANG_CMAKE_DIR}"
 
       - name: Build
         run: cmake --build build
