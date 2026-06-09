@@ -53,7 +53,9 @@ returnguard-project -p build --max-files 100 --dry-run
 
 ## CI sharding
 
-The sorted translation-unit set can be divided deterministically across jobs:
+Translation units are assigned by hashing their path relative to the
+compilation database. Adding one source file therefore does not reshuffle every
+later source between CI jobs, unlike index-based round-robin sharding.
 
 ```sh
 returnguard-project -p build --shard-count 4 --shard-index 0
@@ -62,7 +64,9 @@ returnguard-project -p build --shard-count 4 --shard-index 2
 returnguard-project -p build --shard-count 4 --shard-index 3
 ```
 
-Each source belongs to exactly one shard after filtering and deduplication.
+Each source belongs to exactly one shard after filtering and deduplication. Use
+`--shard-root /path/to/project` when different build directories should produce
+the same shard assignment.
 
 ## Keeping memory and output bounded
 
@@ -82,9 +86,13 @@ A single pathological translation unit can be stopped with a timeout:
 returnguard-project -p build --timeout 180
 ```
 
+On POSIX systems, timeout and Ctrl-C cleanup target the entire ReturnGuard
+process group, so helper processes are not left running. Ctrl-C also stops queued
+work and causes active analyzers to terminate promptly.
+
 Use `--fail-fast` to stop submitting new translation units after the first
-nonzero result. Already-running processes are allowed to finish and their
-output is retained.
+nonzero result. Already-running processes are allowed to finish unless the run
+is interrupted.
 
 ## Exit status
 

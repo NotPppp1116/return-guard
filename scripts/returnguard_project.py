@@ -3,35 +3,32 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
+import hashlib
 import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
-import subprocess
 import sys
+import tempfile
+import threading
 import time
-from dataclasses import dataclass
-from typing import Iterable, Iterator, Pattern, Sequence
+from typing import Iterable, Pattern, Sequence
+
+from returnguard_project_runtime import (
+    RunResult,
+    TranslationUnit,
+    bounded_results,
+    build_command,
+    copy_or_print_output,
+    internal_error_result,
+    run_translation_unit,
+)
 
 
 DEFAULT_EXTENSIONS = (".c",)
 DEFAULT_JOB_LIMIT = 8
-
-
-@dataclass(frozen=True)
-class TranslationUnit:
-    source: pathlib.Path
-
-
-@dataclass(frozen=True)
-class RunResult:
-    source: pathlib.Path
-    command: tuple[str, ...]
-    returncode: int
-    output: str
-    elapsed_seconds: float
 
 
 class RunnerError(RuntimeError):
@@ -64,6 +61,8 @@ def load_translation_units(database: pathlib.Path) -> list[TranslationUnit]:
         raw = json.loads(database.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
         raise RunnerError(f"compilation database not found: {database}") from error
+    except OSError as error:
+        raise RunnerError(f"could not read compilation database {database}: {error}") from error
     except json.JSONDecodeError as error:
         raise RunnerError(
             f"invalid JSON in {database}:{error.lineno}:{error.colno}: {error.msg}"
@@ -92,7 +91,7 @@ def load_translation_units(database: pathlib.Path) -> list[TranslationUnit]:
         if not source.is_absolute():
             source = directory / source
         source = source.resolve(strict=False)
-        unique.setdefault(str(source), TranslationUnit(source=source))
+        unique.setdefault(str(source), TranslationUnit(source))
 
     return sorted(unique.values(), key=lambda unit: unit.source.as_posix())
 
@@ -103,7 +102,9 @@ def compile_patterns(values: Sequence[str], option: str) -> tuple[Pattern[str], 
         try:
             patterns.append(re.compile(value))
         except re.error as error:
-            raise RunnerError(f"invalid {option} regular expression {value!r}: {error}") from error
+            raise RunnerError(
+                f"invalid {option} regular expression {value!r}: {error}"
+            ) from error
     return tuple(patterns)
 
 
@@ -113,12 +114,33 @@ def parse_extensions(value: str) -> frozenset[str]:
         item = item.strip().lower()
         if not item:
             continue
-        if not item.startswith("."):
-            item = "." + item
-        extensions.add(item)
+        extensions.add(item if item.startswith(".") else "." + item)
     if not extensions:
         raise RunnerError("--extensions must contain at least one extension")
     return frozenset(extensions)
+
+
+def shard_key(source: pathlib.Path, shard_root: pathlib.Path) -> str:
+    try:
+        relative = os.path.relpath(source, shard_root)
+    except ValueError:
+        relative = source.as_posix()
+    return pathlib.PurePath(relative).as_posix()
+
+
+def shard_for_source(
+    source: pathlib.Path,
+    *,
+    shard_root: pathlib.Path,
+    shard_count: int,
+) -> int:
+    key = shard_key(source, shard_root).encode("utf-8", errors="surrogateescape")
+    digest = hashlib.blake2b(
+        key,
+        digest_size=8,
+        person=b"returnguard",
+    ).digest()
+    return int.from_bytes(digest, byteorder="big") % shard_count
 
 
 def select_translation_units(
@@ -128,6 +150,7 @@ def select_translation_units(
     include_patterns: Sequence[Pattern[str]],
     exclude_patterns: Sequence[Pattern[str]],
     include_missing: bool,
+    shard_root: pathlib.Path,
     shard_index: int,
     shard_count: int,
     max_files: int | None,
@@ -148,25 +171,34 @@ def select_translation_units(
         if not include_missing and not unit.source.is_file():
             missing += 1
             continue
+        if (
+            shard_for_source(
+                unit.source,
+                shard_root=shard_root,
+                shard_count=shard_count,
+            )
+            != shard_index
+        ):
+            continue
         selected.append(unit)
 
-    sharded = [
-        unit
-        for index, unit in enumerate(selected)
-        if index % shard_count == shard_index
-    ]
     if max_files is not None:
-        sharded = sharded[:max_files]
-    return sharded, missing
+        selected = selected[:max_files]
+    return selected, missing
 
 
 def discover_tool(value: str | None) -> str:
     if value:
         candidate = pathlib.Path(value).expanduser()
-        if candidate.parent != pathlib.Path(".") or candidate.is_absolute():
+        if candidate.is_absolute() or candidate.parent != pathlib.Path("."):
             if not candidate.is_file():
                 raise RunnerError(f"ReturnGuard executable not found: {candidate}")
+            if not os.access(candidate, os.X_OK):
+                raise RunnerError(
+                    f"ReturnGuard executable is not executable: {candidate}"
+                )
             return str(candidate.resolve())
+
         resolved = shutil.which(value)
         if resolved is None:
             raise RunnerError(f"ReturnGuard executable not found in PATH: {value}")
@@ -182,125 +214,6 @@ def discover_tool(value: str | None) -> str:
             "ReturnGuard executable not found; pass --tool or add returnguard to PATH"
         )
     return resolved
-
-
-def build_command(
-    *,
-    tool: str,
-    database_directory: pathlib.Path,
-    source: pathlib.Path,
-    mode: str,
-    fail_on_diagnostics: bool,
-    analyze_headers: bool,
-    include_operators: bool,
-    include_reference_returns: bool,
-    no_color: bool,
-    tool_arguments: Sequence[str],
-) -> tuple[str, ...]:
-    command = [tool, f"--mode={mode}"]
-    if fail_on_diagnostics:
-        command.append("--fail-on-diagnostics")
-    if analyze_headers:
-        command.append("--analyze-headers")
-    if include_operators:
-        command.append("--include-operators")
-    if include_reference_returns:
-        command.append("--include-reference-returns")
-    if no_color:
-        command.append("--no-color")
-    command.extend(tool_arguments)
-    command.extend(("-p", str(database_directory), str(source)))
-    return tuple(command)
-
-
-def run_translation_unit(
-    unit: TranslationUnit,
-    *,
-    tool: str,
-    database_directory: pathlib.Path,
-    mode: str,
-    fail_on_diagnostics: bool,
-    analyze_headers: bool,
-    include_operators: bool,
-    include_reference_returns: bool,
-    no_color: bool,
-    tool_arguments: Sequence[str],
-) -> RunResult:
-    command = build_command(
-        tool=tool,
-        database_directory=database_directory,
-        source=unit.source,
-        mode=mode,
-        fail_on_diagnostics=fail_on_diagnostics,
-        analyze_headers=analyze_headers,
-        include_operators=include_operators,
-        include_reference_returns=include_reference_returns,
-        no_color=no_color,
-        tool_arguments=tool_arguments,
-    )
-
-    started = time.monotonic()
-    completed = subprocess.run(
-        command,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    return RunResult(
-        source=unit.source,
-        command=command,
-        returncode=completed.returncode,
-        output=completed.stdout,
-        elapsed_seconds=time.monotonic() - started,
-    )
-
-
-def bounded_results(
-    units: Sequence[TranslationUnit],
-    *,
-    jobs: int,
-    worker,
-    fail_fast: bool,
-) -> Iterator[RunResult]:
-    iterator = iter(units)
-    stopped = False
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
-        pending: dict[concurrent.futures.Future[RunResult], TranslationUnit] = {}
-
-        def submit_next() -> bool:
-            try:
-                unit = next(iterator)
-            except StopIteration:
-                return False
-            pending[executor.submit(worker, unit)] = unit
-            return True
-
-        for _ in range(min(jobs, len(units))):
-            submit_next()
-
-        while pending:
-            done, _ = concurrent.futures.wait(
-                pending,
-                return_when=concurrent.futures.FIRST_COMPLETED,
-            )
-            for future in done:
-                pending.pop(future)
-                result = future.result()
-                yield result
-                if fail_fast and result.returncode != 0:
-                    stopped = True
-
-            if stopped:
-                for future in pending:
-                    future.cancel()
-                continue
-
-            for _ in done:
-                submit_next()
 
 
 def parser() -> argparse.ArgumentParser:
@@ -339,8 +252,20 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--include-missing", action="store_true")
     result.add_argument("--shard-index", type=int, default=0)
     result.add_argument("--shard-count", type=int, default=1)
+    result.add_argument(
+        "--shard-root",
+        type=pathlib.Path,
+        help="root used to derive stable relative paths for CI sharding",
+    )
     result.add_argument("--max-files", type=int)
     result.add_argument("--fail-fast", action="store_true")
+    result.add_argument("--timeout", type=float, help="per-file timeout in seconds")
+    result.add_argument("--log-dir", type=pathlib.Path)
+    result.add_argument(
+        "--no-stream-output",
+        action="store_true",
+        help="write diagnostics only to --log-dir instead of stdout",
+    )
     result.add_argument("--list-files", action="store_true")
     result.add_argument("--dry-run", action="store_true")
     result.add_argument("--verbose", action="store_true")
@@ -359,34 +284,50 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def validate_arguments(arguments: argparse.Namespace) -> int:
+    jobs = arguments.jobs if arguments.jobs is not None else default_jobs()
+    if jobs < 1:
+        raise RunnerError("--jobs must be at least 1")
+    if arguments.shard_count < 1:
+        raise RunnerError("--shard-count must be at least 1")
+    if not 0 <= arguments.shard_index < arguments.shard_count:
+        raise RunnerError("--shard-index must be in [0, shard-count)")
+    if arguments.max_files is not None and arguments.max_files < 1:
+        raise RunnerError("--max-files must be at least 1")
+    if arguments.progress_every < 0:
+        raise RunnerError("--progress-every cannot be negative")
+    if arguments.timeout is not None and arguments.timeout <= 0:
+        raise RunnerError("--timeout must be greater than zero")
+    if arguments.no_stream_output and arguments.log_dir is None:
+        raise RunnerError("--no-stream-output requires --log-dir")
+    return jobs
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser().parse_args(argv)
 
     try:
-        jobs = arguments.jobs if arguments.jobs is not None else default_jobs()
-        if jobs < 1:
-            raise RunnerError("--jobs must be at least 1")
-        if arguments.shard_count < 1:
-            raise RunnerError("--shard-count must be at least 1")
-        if not 0 <= arguments.shard_index < arguments.shard_count:
-            raise RunnerError("--shard-index must be in [0, shard-count)")
-        if arguments.max_files is not None and arguments.max_files < 1:
-            raise RunnerError("--max-files must be at least 1")
-        if arguments.progress_every < 0:
-            raise RunnerError("--progress-every cannot be negative")
-
+        jobs = validate_arguments(arguments)
         database = compile_database_path(arguments.build_path)
         all_units = load_translation_units(database)
+        shard_root = (
+            arguments.shard_root.expanduser().resolve()
+            if arguments.shard_root is not None
+            else database.parent
+        )
         selected, missing = select_translation_units(
             all_units,
             extensions=parse_extensions(arguments.extensions),
             include_patterns=compile_patterns(
-                arguments.include_regex, "--include-regex"
+                arguments.include_regex,
+                "--include-regex",
             ),
             exclude_patterns=compile_patterns(
-                arguments.exclude_regex, "--exclude-regex"
+                arguments.exclude_regex,
+                "--exclude-regex",
             ),
             include_missing=arguments.include_missing,
+            shard_root=shard_root,
             shard_index=arguments.shard_index,
             shard_count=arguments.shard_count,
             max_files=arguments.max_files,
@@ -405,7 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         tool = discover_tool(arguments.tool)
-        worker_arguments = dict(
+        common_arguments = dict(
             tool=tool,
             database_directory=database.parent,
             mode=arguments.mode,
@@ -420,8 +361,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.dry_run:
             for unit in selected:
                 print(
-                    " ".join(
-                        build_command(source=unit.source, **worker_arguments)
+                    shlex.join(
+                        build_command(
+                            source=unit.source,
+                            **common_arguments,
+                        )
                     )
                 )
             return 0
@@ -429,54 +373,97 @@ def main(argv: Sequence[str] | None = None) -> int:
         started = time.monotonic()
         completed_count = 0
         failed_count = 0
+        timed_out_count = 0
+        internal_error_count = 0
+        stop_event = threading.Event()
 
-        def worker(unit: TranslationUnit) -> RunResult:
-            return run_translation_unit(unit, **worker_arguments)
+        with tempfile.TemporaryDirectory(prefix="returnguard-project-") as temporary:
+            output_directory = pathlib.Path(temporary)
 
-        for result in bounded_results(
-            selected,
-            jobs=min(jobs, len(selected)),
-            worker=worker,
-            fail_fast=arguments.fail_fast,
-        ):
-            completed_count += 1
-            if result.returncode != 0:
-                failed_count += 1
+            def worker(unit: TranslationUnit) -> RunResult:
+                try:
+                    return run_translation_unit(
+                        unit,
+                        output_directory=output_directory,
+                        timeout_seconds=arguments.timeout,
+                        stop_event=stop_event,
+                        **common_arguments,
+                    )
+                except Exception:
+                    command = build_command(
+                        source=unit.source,
+                        **common_arguments,
+                    )
+                    return internal_error_result(
+                        unit,
+                        output_directory=output_directory,
+                        command=command,
+                    )
 
-            if arguments.verbose:
-                print(
-                    f"returnguard-project: [{completed_count}/{len(selected)}] "
-                    f"{result.source} ({result.elapsed_seconds:.2f}s, "
-                    f"exit {result.returncode})",
-                    file=sys.stderr,
-                )
-                print(
-                    "returnguard-project: command: " + " ".join(result.command),
-                    file=sys.stderr,
-                )
+            results = bounded_results(
+                selected,
+                jobs=min(jobs, len(selected)),
+                worker=worker,
+                fail_fast=arguments.fail_fast,
+                stop_event=stop_event,
+            )
+            try:
+                for run_result in results:
+                    completed_count += 1
+                    if run_result.returncode != 0:
+                        failed_count += 1
+                    if run_result.timed_out:
+                        timed_out_count += 1
+                    if run_result.internal_error:
+                        internal_error_count += 1
 
-            if result.output:
-                sys.stdout.write(result.output)
-                if not result.output.endswith("\n"):
-                    sys.stdout.write("\n")
-                sys.stdout.flush()
+                    if arguments.verbose:
+                        print(
+                            f"returnguard-project: [{completed_count}/{len(selected)}] "
+                            f"{run_result.source} ({run_result.elapsed_seconds:.2f}s, "
+                            f"exit {run_result.returncode})",
+                            file=sys.stderr,
+                        )
+                        print(
+                            "returnguard-project: command: "
+                            + shlex.join(run_result.command),
+                            file=sys.stderr,
+                        )
 
-            if (
-                arguments.progress_every > 0
-                and completed_count % arguments.progress_every == 0
-            ):
-                print(
-                    f"returnguard-project: completed {completed_count}/"
-                    f"{len(selected)} translation units",
-                    file=sys.stderr,
-                )
+                    copy_or_print_output(
+                        run_result,
+                        log_directory=(
+                            arguments.log_dir.expanduser().resolve()
+                            if arguments.log_dir is not None
+                            else None
+                        ),
+                        stream_output=not arguments.no_stream_output,
+                    )
+
+                    if (
+                        arguments.progress_every > 0
+                        and completed_count % arguments.progress_every == 0
+                    ):
+                        print(
+                            f"returnguard-project: completed {completed_count}/"
+                            f"{len(selected)} translation units",
+                            file=sys.stderr,
+                        )
+            except KeyboardInterrupt:
+                stop_event.set()
+                results.close()
+                raise
 
         elapsed = time.monotonic() - started
+        stopped_early = completed_count < len(selected)
         print(
             "returnguard-project: "
             f"analyzed {completed_count}/{len(selected)} translation units "
             f"in {elapsed:.2f}s with {min(jobs, len(selected))} job(s); "
-            f"{failed_count} failed; {missing} missing source file(s) skipped",
+            f"{failed_count} failed; {timed_out_count} timed out; "
+            f"{internal_error_count} internal worker error(s); "
+            f"{missing} missing source file(s) skipped"
+            + ("; stopped early" if stopped_early else ""),
             file=sys.stderr,
         )
         return 1 if failed_count else 0
