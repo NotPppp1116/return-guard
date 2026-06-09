@@ -100,6 +100,85 @@ Truth evaluate_impl(const clang::Expr* expression, const EvaluationTarget& targe
     return Truth::Unknown;
 }
 
+bool is_guard_comparison(clang::BinaryOperatorKind opcode) {
+    return opcode == clang::BO_NE || opcode == clang::BO_LT || opcode == clang::BO_LE ||
+           opcode == clang::BO_GT || opcode == clang::BO_GE;
+}
+
+bool is_target_comparison(const clang::Expr* expression, const EvaluationTarget& target,
+                          const clang::ASTContext& context, clang::BinaryOperatorKind opcode) {
+    expression = strip_expr(expression);
+    const auto* binary = llvm::dyn_cast_or_null<clang::BinaryOperator>(expression);
+    if (binary == nullptr || binary->getOpcode() != opcode) {
+        return false;
+    }
+
+    const SymbolicInteger lhs = symbolic_integer_impl(binary->getLHS(), target, context);
+    const SymbolicInteger rhs = symbolic_integer_impl(binary->getRHS(), target, context);
+    return (lhs.is_target && rhs.constant.has_value()) ||
+           (rhs.is_target && lhs.constant.has_value());
+}
+
+bool is_target_guard_comparison(const clang::Expr* expression, const EvaluationTarget& target,
+                                const clang::ASTContext& context) {
+    expression = strip_expr(expression);
+    const auto* binary = llvm::dyn_cast_or_null<clang::BinaryOperator>(expression);
+    if (binary == nullptr || !is_guard_comparison(binary->getOpcode())) {
+        return false;
+    }
+
+    const SymbolicInteger lhs = symbolic_integer_impl(binary->getLHS(), target, context);
+    const SymbolicInteger rhs = symbolic_integer_impl(binary->getRHS(), target, context);
+    return (lhs.is_target && rhs.constant.has_value()) ||
+           (rhs.is_target && lhs.constant.has_value());
+}
+
+bool is_allowed_condition_impl(const clang::Expr* expression, const EvaluationTarget& target,
+                               const clang::ASTContext& context) {
+    expression = strip_expr(expression);
+    if (expression == nullptr) {
+        return false;
+    }
+
+    if (is_target_comparison(expression, target, context, clang::BO_EQ)) {
+        return true;
+    }
+
+    const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(expression);
+    if (binary != nullptr && binary->getOpcode() == clang::BO_LOr) {
+        return is_allowed_condition_impl(binary->getLHS(), target, context) &&
+               is_allowed_condition_impl(binary->getRHS(), target, context);
+    }
+
+    return false;
+}
+
+bool is_guard_condition_impl(const clang::Expr* expression, const EvaluationTarget& target,
+                             const clang::ASTContext& context) {
+    expression = strip_expr(expression);
+    if (expression == nullptr) {
+        return false;
+    }
+
+    if (is_target_guard_comparison(expression, target, context)) {
+        return true;
+    }
+
+    if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(expression);
+        unary != nullptr && unary->getOpcode() == clang::UO_LNot) {
+        return is_allowed_condition_impl(unary->getSubExpr(), target, context);
+    }
+
+    const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(expression);
+    if (binary != nullptr &&
+        (binary->getOpcode() == clang::BO_LAnd || binary->getOpcode() == clang::BO_LOr)) {
+        return is_guard_condition_impl(binary->getLHS(), target, context) &&
+               is_guard_condition_impl(binary->getRHS(), target, context);
+    }
+
+    return false;
+}
+
 } // namespace
 
 Truth invert(Truth value) {
@@ -176,6 +255,18 @@ Truth evaluate_condition_for_value(const clang::Expr* expression, const clang::E
                                    const clang::ASTContext& context) {
     return evaluate_impl(expression, {.variable = nullptr, .expression = target}, target_value,
                          context);
+}
+
+bool is_guard_condition(const clang::Expr* expression, const clang::VarDecl* target,
+                        const clang::ASTContext& context) {
+    return is_guard_condition_impl(expression, {.variable = target, .expression = nullptr},
+                                   context);
+}
+
+bool is_guard_condition(const clang::Expr* expression, const clang::Expr* target,
+                        const clang::ASTContext& context) {
+    return is_guard_condition_impl(expression, {.variable = nullptr, .expression = target},
+                                   context);
 }
 
 } // namespace returnguard::internal

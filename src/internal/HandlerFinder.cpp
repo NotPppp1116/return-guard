@@ -8,6 +8,7 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/SourceManager.h>
+#include <llvm/Support/Casting.h>
 
 #include <algorithm>
 
@@ -15,12 +16,15 @@ namespace returnguard::internal {
 
 HandlerFinder::HandlerFinder(Analyzer& analyzer, const clang::VarDecl* variable,
                              clang::SourceLocation after, const Domain& domain)
-    : analyzer_(analyzer), variable_(variable), after_(after), domain_(domain),
-      covered_(domain.values.size(), false) {}
+    : analyzer_(analyzer), after_(after), domain_(domain), covered_(domain.values.size(), false) {
+    add_tracked_variable(variable);
+}
 
 bool HandlerFinder::has_any_use() const { return has_any_use_; }
 
 bool HandlerFinder::has_any_check() const { return has_any_check_; }
+
+bool HandlerFinder::forwarded() const { return forwarded_; }
 
 bool HandlerFinder::exhaustive() const { return exhaustive_; }
 
@@ -40,6 +44,53 @@ bool HandlerFinder::occurs_after(clang::SourceLocation location) const {
         return false;
     }
     return manager.isBeforeInTranslationUnit(after, location);
+}
+
+bool HandlerFinder::tracks(const clang::VarDecl* variable) const {
+    return variable != nullptr && std::find(tracked_variables_.begin(), tracked_variables_.end(),
+                                            variable) != tracked_variables_.end();
+}
+
+const clang::VarDecl* HandlerFinder::tracked_reference(const clang::Expr* expression) const {
+    const clang::VarDecl* variable = referenced_variable(expression);
+    return tracks(variable) ? variable : nullptr;
+}
+
+const clang::VarDecl*
+HandlerFinder::forwarded_tracked_variable(const clang::Expr* expression) const {
+    for (const clang::VarDecl* variable : tracked_variables_) {
+        if (expression_forwards_variable(expression, variable)) {
+            return variable;
+        }
+    }
+    return nullptr;
+}
+
+const clang::VarDecl* HandlerFinder::condition_variable(const clang::Stmt* statement) const {
+    for (const clang::VarDecl* variable : tracked_variables_) {
+        if (expression_references_variable(statement, variable)) {
+            return variable;
+        }
+    }
+    return nullptr;
+}
+
+bool HandlerFinder::expression_references_tracked(const clang::Stmt* statement) const {
+    return condition_variable(statement) != nullptr;
+}
+
+void HandlerFinder::add_tracked_variable(const clang::VarDecl* variable) {
+    if (variable == nullptr || tracks(variable)) {
+        return;
+    }
+    tracked_variables_.push_back(variable);
+}
+
+void HandlerFinder::remove_tracked_variable(const clang::VarDecl* variable) {
+    tracked_variables_.erase(
+        std::remove(tracked_variables_.begin(), tracked_variables_.end(), variable),
+        tracked_variables_.end());
+    invalidated_ = tracked_variables_.empty();
 }
 
 void HandlerFinder::mark_switch(const clang::SwitchStmt* statement) {
@@ -69,9 +120,9 @@ void HandlerFinder::mark_switch(const clang::SwitchStmt* statement) {
     }
 }
 
-void HandlerFinder::mark_if_chain(const clang::IfStmt* statement) {
+void HandlerFinder::mark_if_chain(const clang::IfStmt* statement, const clang::VarDecl* variable) {
     has_any_check_ = true;
-    const CheckResult result = analyzer_.analyze_if_chain(statement, variable_, domain_);
+    const CheckResult result = analyzer_.analyze_if_chain(statement, variable, domain_);
 
     if (result.kind == HandlingKind::ExhaustivelyChecked) {
         exhaustive_ = true;
@@ -99,9 +150,9 @@ void HandlerFinder::mark_if_chain(const clang::IfStmt* statement) {
     exhaustive_ = std::all_of(covered_.begin(), covered_.end(), [](bool value) { return value; });
 }
 
-void HandlerFinder::mark_condition(const clang::Expr* condition) {
+void HandlerFinder::mark_condition(const clang::Expr* condition, const clang::VarDecl* variable) {
     has_any_check_ = true;
-    const CheckResult result = analyzer_.analyze_condition(condition, variable_, domain_);
+    const CheckResult result = analyzer_.analyze_condition(condition, variable, domain_);
 
     if (result.kind == HandlingKind::ExhaustivelyChecked) {
         exhaustive_ = true;
@@ -127,13 +178,19 @@ void HandlerFinder::mark_condition(const clang::Expr* condition) {
     }
 
     exhaustive_ = std::all_of(covered_.begin(), covered_.end(), [](bool value) { return value; });
+}
+
+void HandlerFinder::mark_fallback_condition(const clang::Expr*) {
+    has_any_check_ = true;
+    exhaustive_ = true;
+    std::fill(covered_.begin(), covered_.end(), true);
 }
 
 bool HandlerFinder::VisitSwitchStmt(clang::SwitchStmt* statement) {
     if (invalidated_ || !occurs_after(statement->getSwitchLoc())) {
         return true;
     }
-    if (!expression_references_variable(statement->getCond(), variable_)) {
+    if (!expression_references_tracked(statement->getCond())) {
         return true;
     }
     mark_switch(statement);
@@ -144,58 +201,123 @@ bool HandlerFinder::VisitIfStmt(clang::IfStmt* statement) {
     if (invalidated_ || !occurs_after(statement->getIfLoc())) {
         return true;
     }
-    if (!expression_references_variable(statement->getCond(), variable_)) {
+    const clang::VarDecl* variable = condition_variable(statement->getCond());
+    if (variable == nullptr) {
         return true;
     }
-    mark_if_chain(statement);
+    mark_if_chain(statement, variable);
     return true;
 }
 
 bool HandlerFinder::VisitWhileStmt(clang::WhileStmt* statement) {
-    if (invalidated_ || !occurs_after(statement->getWhileLoc()) ||
-        !expression_references_variable(statement->getCond(), variable_)) {
+    const clang::VarDecl* variable = condition_variable(statement->getCond());
+    if (invalidated_ || !occurs_after(statement->getWhileLoc()) || variable == nullptr) {
         return true;
     }
-    mark_condition(statement->getCond());
+    mark_condition(statement->getCond(), variable);
     return true;
 }
 
 bool HandlerFinder::VisitDoStmt(clang::DoStmt* statement) {
-    if (invalidated_ || !occurs_after(statement->getDoLoc()) ||
-        !expression_references_variable(statement->getCond(), variable_)) {
+    const clang::VarDecl* variable = condition_variable(statement->getCond());
+    if (invalidated_ || !occurs_after(statement->getDoLoc()) || variable == nullptr) {
         return true;
     }
-    mark_condition(statement->getCond());
+    mark_condition(statement->getCond(), variable);
     return true;
 }
 
 bool HandlerFinder::VisitForStmt(clang::ForStmt* statement) {
+    const clang::VarDecl* variable = condition_variable(statement->getCond());
     if (invalidated_ || !occurs_after(statement->getForLoc()) || statement->getCond() == nullptr ||
-        !expression_references_variable(statement->getCond(), variable_)) {
+        variable == nullptr) {
         return true;
     }
-    mark_condition(statement->getCond());
+    mark_condition(statement->getCond(), variable);
     return true;
+}
+
+bool HandlerFinder::TraverseDeclStmt(clang::DeclStmt* statement, DataRecursionQueue* queue) {
+    if (invalidated_ || !occurs_after(statement->getBeginLoc())) {
+        return clang::RecursiveASTVisitor<HandlerFinder>::TraverseDeclStmt(statement, queue);
+    }
+
+    for (const clang::Decl* declaration : statement->decls()) {
+        const auto* variable = llvm::dyn_cast<clang::VarDecl>(declaration);
+        if (variable == nullptr || variable->getInit() == nullptr) {
+            continue;
+        }
+
+        if (forwarded_tracked_variable(variable->getInit()) != nullptr) {
+            add_tracked_variable(variable);
+            continue;
+        }
+
+        if (expression_references_tracked(variable->getInit())) {
+            has_any_use_ = true;
+            invalidated_ = true;
+            return true;
+        }
+    }
+    return true;
+}
+
+bool HandlerFinder::TraverseConditionalOperator(clang::ConditionalOperator* expression) {
+    const clang::VarDecl* variable = condition_variable(expression->getCond());
+    if (invalidated_ || !occurs_after(expression->getQuestionLoc()) || variable == nullptr) {
+        return clang::RecursiveASTVisitor<HandlerFinder>::TraverseConditionalOperator(expression);
+    }
+    mark_fallback_condition(expression->getCond());
+    return true;
+}
+
+bool HandlerFinder::TraverseReturnStmt(clang::ReturnStmt* statement) {
+    if (invalidated_ || !occurs_after(statement->getReturnLoc())) {
+        return clang::RecursiveASTVisitor<HandlerFinder>::TraverseReturnStmt(statement);
+    }
+
+    const clang::Expr* value = statement->getRetValue();
+    if (forwarded_tracked_variable(value) != nullptr) {
+        forwarded_ = true;
+        invalidated_ = true;
+        return true;
+    }
+
+    return clang::RecursiveASTVisitor<HandlerFinder>::TraverseReturnStmt(statement);
 }
 
 bool HandlerFinder::VisitBinaryOperator(clang::BinaryOperator* expression) {
     if (invalidated_ || !expression->isAssignmentOp() ||
-        !occurs_after(expression->getOperatorLoc()) ||
-        referenced_variable(expression->getLHS()) != variable_) {
+        !occurs_after(expression->getOperatorLoc())) {
         return true;
     }
 
-    if (expression->getOpcode() != clang::BO_Assign ||
-        expression_references_variable(expression->getRHS(), variable_)) {
-        has_any_use_ = true;
+    const clang::VarDecl* lhs = referenced_variable(expression->getLHS());
+    if (expression->getOpcode() == clang::BO_Assign && lhs != nullptr &&
+        forwarded_tracked_variable(expression->getRHS()) != nullptr) {
+        add_tracked_variable(lhs);
+        return true;
     }
-    invalidated_ = true;
+
+    if (tracks(lhs)) {
+        if (expression->getOpcode() != clang::BO_Assign ||
+            expression_references_tracked(expression->getRHS())) {
+            has_any_use_ = true;
+        }
+        remove_tracked_variable(lhs);
+        return true;
+    }
+
+    if (expression_references_tracked(expression->getRHS())) {
+        has_any_use_ = true;
+        invalidated_ = true;
+    }
     return true;
 }
 
 bool HandlerFinder::VisitUnaryOperator(clang::UnaryOperator* expression) {
-    if (invalidated_ || !occurs_after(expression->getOperatorLoc()) ||
-        referenced_variable(expression->getSubExpr()) != variable_) {
+    const clang::VarDecl* variable = tracked_reference(expression->getSubExpr());
+    if (invalidated_ || !occurs_after(expression->getOperatorLoc()) || variable == nullptr) {
         return true;
     }
 
@@ -205,7 +327,7 @@ bool HandlerFinder::VisitUnaryOperator(clang::UnaryOperator* expression) {
     case clang::UO_PostInc:
     case clang::UO_PostDec:
         has_any_use_ = true;
-        invalidated_ = true;
+        remove_tracked_variable(variable);
         break;
     default:
         break;
@@ -214,7 +336,7 @@ bool HandlerFinder::VisitUnaryOperator(clang::UnaryOperator* expression) {
 }
 
 bool HandlerFinder::VisitDeclRefExpr(clang::DeclRefExpr* reference) {
-    if (!invalidated_ && reference->getDecl() == variable_ &&
+    if (!invalidated_ && tracks(llvm::dyn_cast<clang::VarDecl>(reference->getDecl())) &&
         occurs_after(reference->getExprLoc())) {
         has_any_use_ = true;
     }

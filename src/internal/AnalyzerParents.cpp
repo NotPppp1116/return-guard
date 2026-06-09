@@ -78,6 +78,14 @@ const clang::Expr* matching_condition_parent(const clang::DynTypedNode& parent,
     return nullptr;
 }
 
+const clang::Expr* matching_conditional_operator_parent(const clang::DynTypedNode& parent,
+                                                        const clang::Expr* child) {
+    if (const auto* expression = parent.get<clang::ConditionalOperator>()) {
+        return expression->getCond() == child ? expression->getCond() : nullptr;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 const clang::VarDecl* Analyzer::variable_initialized_by_call(const clang::CallExpr* call) const {
@@ -211,6 +219,31 @@ const clang::Expr* Analyzer::enclosing_direct_loop_condition(const clang::CallEx
     return nullptr;
 }
 
+const clang::Expr*
+Analyzer::enclosing_direct_conditional_condition(const clang::CallExpr* call) const {
+    clang::DynTypedNode current = clang::DynTypedNode::create(*call);
+    for (unsigned depth = 0; depth < 24U; ++depth) {
+        const auto parents = context_.getParents(current);
+        if (parents.empty()) {
+            return nullptr;
+        }
+        const clang::DynTypedNode& parent = parents[0];
+
+        if (const clang::Expr* condition =
+                matching_conditional_operator_parent(parent, expression_from(current))) {
+            return condition;
+        }
+
+        const clang::Expr* child = expression_from(current);
+        const clang::Expr* expression = expression_from(parent);
+        if (child == nullptr || expression == nullptr || !carries_if_condition(expression, child)) {
+            return nullptr;
+        }
+        current = parent;
+    }
+    return nullptr;
+}
+
 const clang::Expr* Analyzer::enclosing_assignment_condition(const clang::CallExpr* call,
                                                             const clang::VarDecl* variable) const {
     clang::DynTypedNode current = clang::DynTypedNode::create(*call);
@@ -225,6 +258,44 @@ const clang::Expr* Analyzer::enclosing_assignment_condition(const clang::CallExp
 
         if (const clang::Expr* condition =
                 matching_condition_parent(parent, expression_from(current))) {
+            return found_assignment ? condition : nullptr;
+        }
+
+        const clang::Expr* child = expression_from(current);
+        const clang::Expr* expression = expression_from(parent);
+        if (child == nullptr || expression == nullptr) {
+            return nullptr;
+        }
+
+        if (!found_assignment && is_simple_assignment_to(expression, child, variable)) {
+            found_assignment = true;
+            current = parent;
+            continue;
+        }
+
+        if (!carries_if_condition(expression, child)) {
+            return nullptr;
+        }
+        current = parent;
+    }
+    return nullptr;
+}
+
+const clang::Expr*
+Analyzer::enclosing_assignment_conditional_condition(const clang::CallExpr* call,
+                                                     const clang::VarDecl* variable) const {
+    clang::DynTypedNode current = clang::DynTypedNode::create(*call);
+    bool found_assignment = false;
+
+    for (unsigned depth = 0; depth < 24U; ++depth) {
+        const auto parents = context_.getParents(current);
+        if (parents.empty()) {
+            return nullptr;
+        }
+        const clang::DynTypedNode& parent = parents[0];
+
+        if (const clang::Expr* condition =
+                matching_conditional_operator_parent(parent, expression_from(current))) {
             return found_assignment ? condition : nullptr;
         }
 

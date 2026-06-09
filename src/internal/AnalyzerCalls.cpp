@@ -37,6 +37,12 @@ CheckResult Analyzer::analyze_variable(const clang::CallExpr* call, const clang:
         return result;
     }
 
+    if (finder.forwarded()) {
+        CheckResult result;
+        result.kind = HandlingKind::Forwarded;
+        return result;
+    }
+
     if (finder.has_any_check()) {
         CheckResult result;
         result.kind = HandlingKind::PartiallyChecked;
@@ -87,11 +93,20 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
         return analyze_direct_condition(condition, call, domain, context_);
     }
 
+    if (const clang::Expr* condition = enclosing_direct_conditional_condition(call)) {
+        return analyze_direct_fallback_condition(condition, call);
+    }
+
     if (const clang::VarDecl* variable = variable_initialized_by_call(call)) {
         return analyze_variable(call, variable, domain);
     }
 
     if (const clang::VarDecl* variable = variable_assigned_from_call(call)) {
+        if (enclosing_assignment_conditional_condition(call, variable) != nullptr) {
+            CheckResult result;
+            result.kind = HandlingKind::ExhaustivelyChecked;
+            return result;
+        }
         if (const clang::Expr* condition = enclosing_assignment_condition(call, variable)) {
             return analyze_condition(condition, variable, domain);
         }

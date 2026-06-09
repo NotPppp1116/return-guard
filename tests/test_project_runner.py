@@ -61,7 +61,8 @@ class ProjectRunnerTests(unittest.TestCase):
             "import pathlib\n"
             "import sys\n"
             f"failing = {failing_literal}\n"
-            "source = pathlib.Path(sys.argv[-1])\n"
+            "source_arg = sys.argv[sys.argv.index('--') - 1] if '--' in sys.argv else sys.argv[-1]\n"
+            "source = pathlib.Path(source_arg)\n"
             "print(f'analyzed:{source.name}')\n"
             "raise SystemExit(1 if source.name == failing else 0)\n",
             encoding="utf-8",
@@ -125,6 +126,85 @@ class ProjectRunnerTests(unittest.TestCase):
                 completed.stdout.strip(),
                 str((root / "src" / "relative.c").resolve()),
             )
+
+    def test_source_root_scan_lists_c_files_without_database(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "src"
+            source.mkdir()
+            (source / "alpha.c").write_text("int alpha;\n", encoding="utf-8")
+            (source / "ignored.cpp").write_text("int ignored;\n", encoding="utf-8")
+            build = root / "build"
+            build.mkdir()
+            (build / "generated.c").write_text("int generated;\n", encoding="utf-8")
+
+            completed = self.run_runner(
+                "--source-root",
+                str(root),
+                "--list-files",
+            )
+
+            lines = [pathlib.Path(line).name for line in completed.stdout.splitlines()]
+            self.assertEqual(lines, ["alpha.c"])
+
+    def test_source_root_dry_run_uses_compile_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "src"
+            include = root / "include"
+            source.mkdir()
+            include.mkdir()
+            (source / "one.c").write_text("int one;\n", encoding="utf-8")
+            tool = self.make_fake_tool(root)
+
+            completed = self.run_runner(
+                "--source-root",
+                str(source),
+                "--tool",
+                str(tool),
+                "--dry-run",
+                f"--compile-arg=-I{include}",
+            )
+
+            self.assertIn(str(source / "one.c"), completed.stdout)
+            self.assertIn("-- -std=c17", completed.stdout)
+            self.assertIn(f"-I{include}", completed.stdout)
+            self.assertNotIn(" -p ", completed.stdout)
+
+            custom_standard = self.run_runner(
+                "--source-root",
+                str(source),
+                "--tool",
+                str(tool),
+                "--dry-run",
+                "--compile-arg=-std=c11",
+            )
+            self.assertIn("-- -std=c11", custom_standard.stdout)
+            self.assertNotIn("-std=c17", custom_standard.stdout)
+
+    def test_source_root_scan_runs_without_database(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "src"
+            source.mkdir()
+            (source / "one.c").write_text("int one;\n", encoding="utf-8")
+            (source / "two.c").write_text("int two;\n", encoding="utf-8")
+            tool = self.make_fake_tool(root)
+
+            completed = self.run_runner(
+                "--source-root",
+                str(source),
+                "--tool",
+                str(tool),
+                "--jobs",
+                "2",
+                "--progress-every",
+                "0",
+            )
+
+            self.assertIn("analyzed:one.c", completed.stdout)
+            self.assertIn("analyzed:two.c", completed.stdout)
+            self.assertIn("2/2 translation units", completed.stderr)
 
     def test_parallel_run_filters_and_propagates_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

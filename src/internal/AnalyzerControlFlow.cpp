@@ -90,6 +90,12 @@ CheckResult Analyzer::analyze_if_chain(const clang::IfStmt* statement,
         return result;
     }
 
+    if (variable != nullptr && is_guard_condition(statement->getCond(), variable, context_) &&
+        statement_exits(statement->getThen())) {
+        result.kind = HandlingKind::ExhaustivelyChecked;
+        return result;
+    }
+
     if (!domain.finite || variable == nullptr) {
         result.detail = "conditional checks have no final else";
         return result;
@@ -162,18 +168,38 @@ CheckResult analyze_direct_condition(const clang::Expr* condition, const clang::
     return result;
 }
 
+CheckResult analyze_direct_fallback_condition(const clang::Expr* condition,
+                                              const clang::Expr* target) {
+    CheckResult result;
+    if (condition == nullptr || target == nullptr) {
+        result.kind = HandlingKind::PartiallyChecked;
+        result.detail = "direct conditional check has no fallback";
+        return result;
+    }
+
+    result.kind = HandlingKind::ExhaustivelyChecked;
+    return result;
+}
+
 CheckResult analyze_direct_if(const clang::IfStmt* statement, const clang::Expr* target,
                               const Domain& domain, const clang::ASTContext& context) {
+    if (statement == nullptr) {
+        CheckResult result;
+        result.kind = HandlingKind::PartiallyChecked;
+        result.detail = "direct conditional check has no exhaustive fallback";
+        return result;
+    }
+
     if (has_final_else(statement)) {
         CheckResult result;
         result.kind = HandlingKind::ExhaustivelyChecked;
         return result;
     }
 
-    if (statement == nullptr) {
+    if (is_guard_condition(statement->getCond(), target, context) &&
+        statement_exits(statement->getThen())) {
         CheckResult result;
-        result.kind = HandlingKind::PartiallyChecked;
-        result.detail = "direct conditional check has no exhaustive fallback";
+        result.kind = HandlingKind::ExhaustivelyChecked;
         return result;
     }
 

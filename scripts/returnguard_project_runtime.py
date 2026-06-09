@@ -22,6 +22,7 @@ PROCESS_TERMINATE_GRACE_SECONDS = 1.0
 @dataclass(frozen=True)
 class TranslationUnit:
     source: pathlib.Path
+    compile_arguments: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class RunResult:
 def build_command(
     *,
     tool: str,
-    database_directory: pathlib.Path,
+    database_directory: pathlib.Path | None,
     source: pathlib.Path,
     mode: str,
     fail_on_diagnostics: bool,
@@ -48,6 +49,7 @@ def build_command(
     include_reference_returns: bool,
     no_color: bool,
     tool_arguments: Sequence[str],
+    compile_arguments: Sequence[str],
 ) -> tuple[str, ...]:
     command = [tool, f"--mode={mode}"]
     if fail_on_diagnostics:
@@ -61,7 +63,12 @@ def build_command(
     if no_color:
         command.append("--no-color")
     command.extend(tool_arguments)
-    command.extend(("-p", str(database_directory), str(source)))
+    if database_directory is None:
+        command.append(str(source))
+        command.append("--")
+        command.extend(compile_arguments)
+    else:
+        command.extend(("-p", str(database_directory), str(source)))
     return tuple(command)
 
 
@@ -154,7 +161,7 @@ def run_translation_unit(
     timeout_seconds: float | None,
     stop_event: threading.Event,
     tool: str,
-    database_directory: pathlib.Path,
+    database_directory: pathlib.Path | None,
     mode: str,
     fail_on_diagnostics: bool,
     analyze_headers: bool,
@@ -174,6 +181,7 @@ def run_translation_unit(
         include_reference_returns=include_reference_returns,
         no_color=no_color,
         tool_arguments=tool_arguments,
+        compile_arguments=unit.compile_arguments,
     )
     output_path = output_path_for(output_directory, unit.source)
     started = time.monotonic()

@@ -29,6 +29,20 @@ from returnguard_project_runtime import (
 
 DEFAULT_EXTENSIONS = (".c",)
 DEFAULT_JOB_LIMIT = 8
+DEFAULT_SCAN_COMPILE_ARGUMENTS = ("-std=c17",)
+DEFAULT_SCAN_EXCLUDED_DIRS = frozenset(
+    {
+        ".cache",
+        ".git",
+        ".hg",
+        ".svn",
+        "__pycache__",
+        "build",
+        "cmake-build-debug",
+        "cmake-build-release",
+        "node_modules",
+    }
+)
 
 
 class RunnerError(RuntimeError):
@@ -100,6 +114,40 @@ def load_translation_units(database: pathlib.Path) -> list[TranslationUnit]:
     return sorted(unique.values(), key=lambda unit: unit.source.as_posix())
 
 
+def discover_translation_units(
+    roots: Sequence[pathlib.Path],
+    *,
+    compile_arguments: Sequence[str],
+    excluded_directories: frozenset[str] = DEFAULT_SCAN_EXCLUDED_DIRS,
+) -> list[TranslationUnit]:
+    unique: dict[str, TranslationUnit] = {}
+    arguments = tuple(compile_arguments)
+
+    for root in roots:
+        root = root.expanduser().resolve(strict=False)
+        if not root.is_dir():
+            raise RunnerError(f"source root is not a directory: {root}")
+
+        for current, directory_names, file_names in os.walk(root):
+            directory_names[:] = [
+                name
+                for name in directory_names
+                if name not in excluded_directories
+                and not name.startswith("cmake-build-")
+                and not name.startswith(".")
+            ]
+
+            current_path = pathlib.Path(current)
+            for file_name in file_names:
+                source = (current_path / file_name).resolve(strict=False)
+                unique.setdefault(
+                    str(source),
+                    TranslationUnit(source, arguments),
+                )
+
+    return sorted(unique.values(), key=lambda unit: unit.source.as_posix())
+
+
 def compile_patterns(values: Sequence[str], option: str) -> tuple[Pattern[str], ...]:
     patterns: list[Pattern[str]] = []
     for value in values:
@@ -122,6 +170,19 @@ def parse_extensions(value: str) -> frozenset[str]:
     if not extensions:
         raise RunnerError("--extensions must contain at least one extension")
     return frozenset(extensions)
+
+
+def scan_compile_arguments(values: Sequence[str]) -> tuple[str, ...]:
+    arguments = tuple(values)
+    has_language_standard = any(
+        argument == "-std"
+        or argument.startswith("-std=")
+        or argument.startswith("--std=")
+        for argument in arguments
+    )
+    if has_language_standard:
+        return arguments
+    return (*DEFAULT_SCAN_COMPILE_ARGUMENTS, *arguments)
 
 
 def shard_key(source: pathlib.Path, shard_root: pathlib.Path) -> str:
@@ -230,9 +291,18 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "-p",
         "--build-path",
-        required=True,
         type=pathlib.Path,
-        help="build directory or compile_commands.json path",
+        help=(
+            "build directory, compile_commands.json path, or source root when "
+            "no compilation database is present"
+        ),
+    )
+    result.add_argument(
+        "--source-root",
+        action="append",
+        default=[],
+        type=pathlib.Path,
+        help="source tree to scan when not using a compilation database",
     )
     result.add_argument("--tool", help="ReturnGuard executable (default: sibling or PATH)")
     result.add_argument("-j", "--jobs", type=int, help="parallel analyzer processes")
@@ -285,11 +355,22 @@ def parser() -> argparse.ArgumentParser:
         default=[],
         help="extra argument passed to every ReturnGuard process",
     )
+    result.add_argument(
+        "--compile-arg",
+        action="append",
+        default=[],
+        help=(
+            "Clang argument used for scanned source roots; repeat for "
+            "includes, defines, and language options"
+        ),
+    )
     return result
 
 
 def validate_arguments(arguments: argparse.Namespace) -> int:
     jobs = arguments.jobs if arguments.jobs is not None else default_jobs()
+    if arguments.build_path is None and not arguments.source_root:
+        raise RunnerError("--build-path or --source-root is required")
     if jobs < 1:
         raise RunnerError("--jobs must be at least 1")
     if arguments.shard_count < 1:
@@ -312,12 +393,35 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         jobs = validate_arguments(arguments)
-        database = compile_database_path(arguments.build_path)
-        all_units = load_translation_units(database)
+        database = (
+            compile_database_path(arguments.build_path)
+            if arguments.build_path is not None
+            else None
+        )
+        source_roots = [
+            path.expanduser().resolve(strict=False)
+            for path in arguments.source_root
+        ]
+        if database is not None and database.is_file():
+            all_units = load_translation_units(database)
+            database_directory = database.parent
+            default_shard_root = database.parent
+        else:
+            if not source_roots:
+                assert arguments.build_path is not None
+                source_roots = [arguments.build_path.expanduser().resolve(strict=False)]
+            compile_arguments = scan_compile_arguments(arguments.compile_arg)
+            all_units = discover_translation_units(
+                source_roots,
+                compile_arguments=compile_arguments,
+            )
+            database_directory = None
+            default_shard_root = source_roots[0]
+
         shard_root = (
             arguments.shard_root.expanduser().resolve()
             if arguments.shard_root is not None
-            else database.parent
+            else default_shard_root
         )
         selected, missing = select_translation_units(
             all_units,
@@ -352,7 +456,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         tool = discover_tool(arguments.tool)
         common_arguments = dict(
             tool=tool,
-            database_directory=database.parent,
+            database_directory=database_directory,
             mode=arguments.mode,
             fail_on_diagnostics=arguments.fail_on_diagnostics,
             analyze_headers=arguments.analyze_headers,
@@ -368,6 +472,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     shlex.join(
                         build_command(
                             source=unit.source,
+                            compile_arguments=unit.compile_arguments,
                             **common_arguments,
                         )
                     )
@@ -396,6 +501,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 except Exception:
                     command = build_command(
                         source=unit.source,
+                        compile_arguments=unit.compile_arguments,
                         **common_arguments,
                     )
                     return internal_error_result(
