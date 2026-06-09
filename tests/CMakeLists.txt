@@ -48,3 +48,11 @@ add_test(
         "${CMAKE_CURRENT_SOURCE_DIR}/test_project_runner.py"
         --runner "${CMAKE_SOURCE_DIR}/scripts/returnguard_project_v2.py"
 )
+
+add_test(
+    NAME returnguard.project_runner_scaling
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_project_runner_scaling.py"
+        --runner "${CMAKE_SOURCE_DIR}/scripts/returnguard_project_v2.py"
+)
