@@ -15,17 +15,15 @@
 
 namespace returnguard::internal {
 
-CheckResult Analyzer::analyze_switch(
-    const clang::SwitchStmt* statement,
-    const Domain& domain) const {
+CheckResult Analyzer::analyze_switch(const clang::SwitchStmt* statement,
+                                     const Domain& domain) const {
     CheckResult result;
     result.kind = HandlingKind::PartiallyChecked;
 
     std::vector<bool> covered(domain.values.size(), false);
     bool has_default = false;
 
-    for (const clang::SwitchCase* current = statement->getSwitchCaseList();
-         current != nullptr;
+    for (const clang::SwitchCase* current = statement->getSwitchCaseList(); current != nullptr;
          current = current->getNextSwitchCase()) {
         if (llvm::isa<clang::DefaultStmt>(current)) {
             has_default = true;
@@ -82,10 +80,8 @@ CheckResult Analyzer::analyze_switch(
     return result;
 }
 
-CheckResult Analyzer::analyze_if_chain(
-    const clang::IfStmt* statement,
-    const clang::VarDecl* variable,
-    const Domain& domain) const {
+CheckResult Analyzer::analyze_if_chain(const clang::IfStmt* statement,
+                                       const clang::VarDecl* variable, const Domain& domain) const {
     CheckResult result;
     result.kind = HandlingKind::PartiallyChecked;
 
@@ -103,8 +99,7 @@ CheckResult Analyzer::analyze_if_chain(
     for (const DomainValue& value : domain.values) {
         bool handled = false;
         for (const clang::IfStmt* current : chain) {
-            if (evaluate_condition_for_value(
-                    current->getCond(), variable, value.value, context_) ==
+            if (evaluate_condition_for_value(current->getCond(), variable, value.value, context_) ==
                 Truth::True) {
                 handled = true;
                 break;
@@ -121,42 +116,70 @@ CheckResult Analyzer::analyze_if_chain(
     return result;
 }
 
-CheckResult analyze_direct_if(
-    const clang::IfStmt* statement,
-    const clang::Expr* target,
-    const Domain& domain,
-    const clang::ASTContext& context) {
+CheckResult Analyzer::analyze_condition(const clang::Expr* condition,
+                                        const clang::VarDecl* variable,
+                                        const Domain& domain) const {
     CheckResult result;
     result.kind = HandlingKind::PartiallyChecked;
 
-    if (has_final_else(statement)) {
-        result.kind = HandlingKind::ExhaustivelyChecked;
+    if (!domain.finite || variable == nullptr) {
+        result.detail = "conditional check has no exhaustive fallback";
         return result;
     }
 
-    if (!domain.finite || target == nullptr) {
-        result.detail = "direct conditional checks have no final else";
-        return result;
-    }
-
-    const std::vector<const clang::IfStmt*> chain = if_chain(statement);
     for (const DomainValue& value : domain.values) {
-        bool handled = false;
-        for (const clang::IfStmt* current : chain) {
-            if (evaluate_condition_for_value(
-                    current->getCond(), target, value.value, context) ==
-                Truth::True) {
-                handled = true;
-                break;
-            }
-        }
-        if (!handled) {
+        if (evaluate_condition_for_value(condition, variable, value.value, context_) !=
+            Truth::True) {
             result.missing.push_back(value);
         }
     }
 
     if (result.missing.empty()) {
         result.kind = HandlingKind::ExhaustivelyChecked;
+    }
+    return result;
+}
+
+CheckResult analyze_direct_condition(const clang::Expr* condition, const clang::Expr* target,
+                                     const Domain& domain, const clang::ASTContext& context) {
+    CheckResult result;
+    result.kind = HandlingKind::PartiallyChecked;
+
+    if (!domain.finite || target == nullptr) {
+        result.detail = "direct conditional check has no exhaustive fallback";
+        return result;
+    }
+
+    for (const DomainValue& value : domain.values) {
+        if (evaluate_condition_for_value(condition, target, value.value, context) != Truth::True) {
+            result.missing.push_back(value);
+        }
+    }
+
+    if (result.missing.empty()) {
+        result.kind = HandlingKind::ExhaustivelyChecked;
+    }
+    return result;
+}
+
+CheckResult analyze_direct_if(const clang::IfStmt* statement, const clang::Expr* target,
+                              const Domain& domain, const clang::ASTContext& context) {
+    if (has_final_else(statement)) {
+        CheckResult result;
+        result.kind = HandlingKind::ExhaustivelyChecked;
+        return result;
+    }
+
+    if (statement == nullptr) {
+        CheckResult result;
+        result.kind = HandlingKind::PartiallyChecked;
+        result.detail = "direct conditional check has no exhaustive fallback";
+        return result;
+    }
+
+    CheckResult result = analyze_direct_condition(statement->getCond(), target, domain, context);
+    if (!result.detail.empty()) {
+        result.detail = "direct conditional checks have no final else";
     }
     return result;
 }

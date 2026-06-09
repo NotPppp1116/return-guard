@@ -13,32 +13,18 @@
 
 namespace returnguard::internal {
 
-HandlerFinder::HandlerFinder(
-    Analyzer& analyzer,
-    const clang::VarDecl* variable,
-    clang::SourceLocation after,
-    const Domain& domain)
-    : analyzer_(analyzer),
-      variable_(variable),
-      after_(after),
-      domain_(domain),
+HandlerFinder::HandlerFinder(Analyzer& analyzer, const clang::VarDecl* variable,
+                             clang::SourceLocation after, const Domain& domain)
+    : analyzer_(analyzer), variable_(variable), after_(after), domain_(domain),
       covered_(domain.values.size(), false) {}
 
-bool HandlerFinder::has_any_use() const {
-    return has_any_use_;
-}
+bool HandlerFinder::has_any_use() const { return has_any_use_; }
 
-bool HandlerFinder::has_any_check() const {
-    return has_any_check_;
-}
+bool HandlerFinder::has_any_check() const { return has_any_check_; }
 
-bool HandlerFinder::exhaustive() const {
-    return exhaustive_;
-}
+bool HandlerFinder::exhaustive() const { return exhaustive_; }
 
-const std::vector<bool>& HandlerFinder::covered() const {
-    return covered_;
-}
+const std::vector<bool>& HandlerFinder::covered() const { return covered_; }
 
 bool HandlerFinder::occurs_after(clang::SourceLocation location) const {
     if (location.isInvalid() || after_.isInvalid()) {
@@ -85,8 +71,7 @@ void HandlerFinder::mark_switch(const clang::SwitchStmt* statement) {
 
 void HandlerFinder::mark_if_chain(const clang::IfStmt* statement) {
     has_any_check_ = true;
-    const CheckResult result =
-        analyzer_.analyze_if_chain(statement, variable_, domain_);
+    const CheckResult result = analyzer_.analyze_if_chain(statement, variable_, domain_);
 
     if (result.kind == HandlingKind::ExhaustivelyChecked) {
         exhaustive_ = true;
@@ -111,8 +96,37 @@ void HandlerFinder::mark_if_chain(const clang::IfStmt* statement) {
         }
     }
 
-    exhaustive_ = std::all_of(
-        covered_.begin(), covered_.end(), [](bool value) { return value; });
+    exhaustive_ = std::all_of(covered_.begin(), covered_.end(), [](bool value) { return value; });
+}
+
+void HandlerFinder::mark_condition(const clang::Expr* condition) {
+    has_any_check_ = true;
+    const CheckResult result = analyzer_.analyze_condition(condition, variable_, domain_);
+
+    if (result.kind == HandlingKind::ExhaustivelyChecked) {
+        exhaustive_ = true;
+        std::fill(covered_.begin(), covered_.end(), true);
+        return;
+    }
+
+    if (!domain_.finite) {
+        return;
+    }
+
+    for (std::size_t index = 0; index < domain_.values.size(); ++index) {
+        bool missing = false;
+        for (const DomainValue& value : result.missing) {
+            if (same_value(domain_.values[index].value, value.value)) {
+                missing = true;
+                break;
+            }
+        }
+        if (!missing) {
+            covered_[index] = true;
+        }
+    }
+
+    exhaustive_ = std::all_of(covered_.begin(), covered_.end(), [](bool value) { return value; });
 }
 
 bool HandlerFinder::VisitSwitchStmt(clang::SwitchStmt* statement) {
@@ -134,6 +148,33 @@ bool HandlerFinder::VisitIfStmt(clang::IfStmt* statement) {
         return true;
     }
     mark_if_chain(statement);
+    return true;
+}
+
+bool HandlerFinder::VisitWhileStmt(clang::WhileStmt* statement) {
+    if (invalidated_ || !occurs_after(statement->getWhileLoc()) ||
+        !expression_references_variable(statement->getCond(), variable_)) {
+        return true;
+    }
+    mark_condition(statement->getCond());
+    return true;
+}
+
+bool HandlerFinder::VisitDoStmt(clang::DoStmt* statement) {
+    if (invalidated_ || !occurs_after(statement->getDoLoc()) ||
+        !expression_references_variable(statement->getCond(), variable_)) {
+        return true;
+    }
+    mark_condition(statement->getCond());
+    return true;
+}
+
+bool HandlerFinder::VisitForStmt(clang::ForStmt* statement) {
+    if (invalidated_ || !occurs_after(statement->getForLoc()) || statement->getCond() == nullptr ||
+        !expression_references_variable(statement->getCond(), variable_)) {
+        return true;
+    }
+    mark_condition(statement->getCond());
     return true;
 }
 

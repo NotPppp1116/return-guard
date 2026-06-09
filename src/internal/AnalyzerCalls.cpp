@@ -83,6 +83,10 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
         return analyze_direct_if(statement, call, domain, context_);
     }
 
+    if (const clang::Expr* condition = enclosing_direct_loop_condition(call)) {
+        return analyze_direct_condition(condition, call, domain, context_);
+    }
+
     if (const clang::VarDecl* variable = variable_initialized_by_call(call)) {
         return analyze_variable(call, variable, domain);
     }
