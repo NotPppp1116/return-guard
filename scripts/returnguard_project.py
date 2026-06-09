@@ -87,6 +87,10 @@ def load_translation_units(database: pathlib.Path) -> list[TranslationUnit]:
             )
 
         directory = pathlib.Path(directory_value).expanduser()
+        if not directory.is_absolute():
+            directory = database.parent / directory
+        directory = directory.resolve(strict=False)
+
         source = pathlib.Path(file_value).expanduser()
         if not source.is_absolute():
             source = directory / source

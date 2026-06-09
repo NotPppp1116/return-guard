@@ -17,10 +17,8 @@
 
 namespace returnguard::internal {
 
-CheckResult Analyzer::analyze_variable(
-    const clang::CallExpr* call,
-    const clang::VarDecl* variable,
-    const Domain& domain) {
+CheckResult Analyzer::analyze_variable(const clang::CallExpr* call, const clang::VarDecl* variable,
+                                       const Domain& domain) {
     const clang::FunctionDecl* function = enclosing_function(call);
     if (function == nullptr || !function->doesThisDeclarationHaveABody()) {
         return {
@@ -34,7 +32,9 @@ CheckResult Analyzer::analyze_variable(
     finder.TraverseStmt(const_cast<clang::Stmt*>(function->getBody()));
 
     if (finder.exhaustive()) {
-        return {.kind = HandlingKind::ExhaustivelyChecked};
+        CheckResult result;
+        result.kind = HandlingKind::ExhaustivelyChecked;
+        return result;
     }
 
     if (finder.has_any_check()) {
@@ -68,12 +68,11 @@ CheckResult Analyzer::analyze_variable(
     };
 }
 
-CheckResult Analyzer::classify_call(
-    const clang::CallExpr* call,
-    const Domain& domain) {
-    if (returnguard::options().explicit_void_is_handled &&
-        is_explicit_void_discard(call)) {
-        return {.kind = HandlingKind::ExplicitlyIgnored};
+CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& domain) {
+    if (returnguard::options().explicit_void_is_handled && is_explicit_void_discard(call)) {
+        CheckResult result;
+        result.kind = HandlingKind::ExplicitlyIgnored;
+        return result;
     }
 
     if (const clang::SwitchStmt* statement = enclosing_direct_switch(call)) {
@@ -93,11 +92,15 @@ CheckResult Analyzer::classify_call(
     }
 
     if (call_is_forwarded(call)) {
-        return {.kind = HandlingKind::Forwarded};
+        CheckResult result;
+        result.kind = HandlingKind::Forwarded;
+        return result;
     }
 
     if (call_is_discarded_expression(call)) {
-        return {.kind = HandlingKind::Ignored};
+        CheckResult result;
+        result.kind = HandlingKind::Ignored;
+        return result;
     }
 
     return {
@@ -107,9 +110,7 @@ CheckResult Analyzer::classify_call(
     };
 }
 
-bool Analyzer::should_report(
-    const CheckResult& result,
-    const Domain& domain) const {
+bool Analyzer::should_report(const CheckResult& result, const Domain& domain) const {
     switch (returnguard::options().mode) {
     case Mode::IgnoredOnly:
         return result.kind == HandlingKind::Ignored;
@@ -118,8 +119,7 @@ bool Analyzer::should_report(
         if (result.kind == HandlingKind::Ignored) {
             return true;
         }
-        return domain.finite &&
-               result.kind == HandlingKind::PartiallyChecked;
+        return domain.finite && result.kind == HandlingKind::PartiallyChecked;
 
     case Mode::Strict:
         return result.kind != HandlingKind::ExhaustivelyChecked &&
@@ -143,8 +143,7 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
         return;
     }
 
-    if (!returnguard::options().include_reference_returns &&
-        return_type->isReferenceType()) {
+    if (!returnguard::options().include_reference_returns && return_type->isReferenceType()) {
         return;
     }
 
@@ -159,16 +158,14 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
 
     switch (result.kind) {
     case HandlingKind::Ignored:
-        message << "return value of '" << name << "' ("
-                << return_type.getAsString() << ") is not handled";
+        message << "return value of '" << name << "' (" << return_type.getAsString()
+                << ") is not handled";
         break;
     case HandlingKind::Consumed:
-        message << "return value of '" << name
-                << "' is consumed but not verified";
+        message << "return value of '" << name << "' is consumed but not verified";
         break;
     case HandlingKind::PartiallyChecked:
-        message << "return value of '" << name
-                << "' is not handled exhaustively";
+        message << "return value of '" << name << "' is not handled exhaustively";
         break;
     case HandlingKind::ExplicitlyIgnored:
     case HandlingKind::Forwarded:
@@ -182,7 +179,8 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
     } else if (!result.detail.empty()) {
         note = result.detail;
     } else if (!domain.finite) {
-        note = "return domain is open-ended; use a final else/default or an explicit (void) discard";
+        note =
+            "return domain is open-ended; use a final else/default or an explicit (void) discard";
     }
 
     emit(call, message.str(), note);

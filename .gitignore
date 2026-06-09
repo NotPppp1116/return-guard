@@ -1,6 +1,9 @@
 /build/
+/build-*/
 /cmake-build-*/
 compile_commands.json
+__pycache__/
+*.py[cod]
 *.profraw
 *.profdata
 .cache/

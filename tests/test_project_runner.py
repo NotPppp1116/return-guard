@@ -105,6 +105,27 @@ class ProjectRunnerTests(unittest.TestCase):
             lines = [pathlib.Path(line).name for line in completed.stdout.splitlines()]
             self.assertEqual(lines, ["alpha.c", "beta.c"])
 
+    def test_relative_database_directory_is_resolved_from_database(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            build = self.make_database(root, ["relative.c"])
+            database = build / "compile_commands.json"
+            entries = json.loads(database.read_text(encoding="utf-8"))
+            entries[0]["directory"] = ".."
+            entries[0]["file"] = "src/relative.c"
+            database.write_text(json.dumps(entries), encoding="utf-8")
+
+            completed = self.run_runner(
+                "-p",
+                str(build),
+                "--list-files",
+            )
+
+            self.assertEqual(
+                completed.stdout.strip(),
+                str((root / "src" / "relative.c").resolve()),
+            )
+
     def test_parallel_run_filters_and_propagates_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
