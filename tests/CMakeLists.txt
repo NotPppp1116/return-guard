@@ -18,7 +18,9 @@ endfunction()
 
 add_returnguard_test(
     returnguard.macros macros.c practical 1 "missing 32"
-    --expect "macros.c:7:")
+    --expect "macros.c:"
+    --expect "int status = CALL_STATUS();"
+    --reject "status_api.h:")
 add_returnguard_test(returnguard.enums enums.c practical 1 "missing STATUS_DENIED")
 add_returnguard_test(returnguard.integers integers.c strict 1 "missing 32")
 add_returnguard_test(returnguard.if_chains if_chains.c practical 1 "missing 32")
