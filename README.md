@@ -141,6 +141,9 @@ Then reuse its exact compilation command:
     /path/to/project/src/main.c
 ```
 
+For large compilation databases, install and use `returnguard-project`; see
+[`docs/large-projects.md`](docs/large-projects.md).
+
 The compilation database supplies include paths, `-D` definitions, language
 standard, target options, and other frontend flags.
 
@@ -195,6 +198,7 @@ This is not a complete proof system for C.
 
 ```text
 include/returnguard/       public frontend/options API
+scripts/                   whole-project driver
 src/internal/Model.*       analysis data model
 src/internal/AstUtils.*    AST and constant-expression helpers
 src/internal/Condition*    symbolic condition evaluation
