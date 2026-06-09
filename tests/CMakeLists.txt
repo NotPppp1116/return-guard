@@ -46,5 +46,5 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/test_project_runner.py"
-        --runner "${CMAKE_SOURCE_DIR}/scripts/returnguard_project.py"
+        --runner "${CMAKE_SOURCE_DIR}/scripts/returnguard_project_v2.py"
 )
