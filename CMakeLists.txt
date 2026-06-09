@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(returnguard VERSION 0.4.0 LANGUAGES CXX)
+project(returnguard VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -114,6 +114,11 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS returnguard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(
+    PROGRAMS scripts/returnguard_project.py
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RENAME returnguard-project
+)
 
 if(RETURNGUARD_BUILD_TESTS)
     enable_testing()
