@@ -41,12 +41,15 @@ add_returnguard_test(
     --diagnostic-kind error
     --expected-exit-code 1)
 
+set(RETURNGUARD_PROJECT_RUNNER
+    "${CMAKE_SOURCE_DIR}/scripts/returnguard_project.py")
+
 add_test(
     NAME returnguard.project_runner
     COMMAND
         ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/test_project_runner.py"
-        --runner "${CMAKE_SOURCE_DIR}/scripts/returnguard_project_v2.py"
+        --runner "${RETURNGUARD_PROJECT_RUNNER}"
 )
 
 add_test(
@@ -54,5 +57,5 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/test_project_runner_scaling.py"
-        --runner "${CMAKE_SOURCE_DIR}/scripts/returnguard_project_v2.py"
+        --runner "${RETURNGUARD_PROJECT_RUNNER}"
 )
