@@ -85,6 +85,9 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] const clang::IfStmt* enclosing_direct_if(const clang::CallExpr* call) const;
     [[nodiscard]] const clang::Expr*
     enclosing_direct_loop_condition(const clang::CallExpr* call) const;
+    [[nodiscard]] const clang::Expr*
+    enclosing_assignment_condition(const clang::CallExpr* call,
+                                   const clang::VarDecl* variable) const;
     [[nodiscard]] bool call_is_forwarded(const clang::CallExpr* call) const;
     [[nodiscard]] bool call_is_discarded_expression(const clang::CallExpr* call) const;
     [[nodiscard]] bool call_is_operator(const clang::CallExpr* call) const;

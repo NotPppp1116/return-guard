@@ -92,6 +92,9 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
     }
 
     if (const clang::VarDecl* variable = variable_assigned_from_call(call)) {
+        if (const clang::Expr* condition = enclosing_assignment_condition(call, variable)) {
+            return analyze_condition(condition, variable, domain);
+        }
         return analyze_variable(call, variable, domain);
     }
 
