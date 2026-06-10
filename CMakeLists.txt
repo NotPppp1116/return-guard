@@ -219,7 +219,10 @@ if(RETURNGUARD_BUILD_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_instrumentation.py"
             --tool "$<TARGET_FILE:returnguard>"
             --source "${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/instrumentation.c"
+            --cases "${CMAKE_CURRENT_SOURCE_DIR}/tests/cases"
             --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
             --compiler "${CMAKE_C_COMPILER}"
+            --cxx-compiler "${CMAKE_CXX_COMPILER}"
+            --runtime "$<TARGET_FILE:returnguard_runtime>"
     )
 endif()
