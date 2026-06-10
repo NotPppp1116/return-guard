@@ -9,6 +9,7 @@ function(add_returnguard_test name source mode warning_count expected_text)
             --tool "$<TARGET_FILE:returnguard>"
             --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/${source}"
             --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            --include "${CMAKE_SOURCE_DIR}/include"
             --mode "${mode}"
             --warning-count "${warning_count}"
             --expect "${expected_text}"
@@ -51,11 +52,21 @@ add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value 
 add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
 add_returnguard_test(
+    returnguard.null_state null_state.c practical 9
+    "is dereferenced without a prior null check"
+    --expect "pointer returned here is marked nullable")
+add_returnguard_test(
+    returnguard.null_state_strict null_state_strict.c strict 2
+    "is dereferenced without a prior null check"
+    --expect "consumed but not verified")
+add_returnguard_test(
     returnguard.fail_on_diagnostics ignored.c ignored-only 1
     "return value of 'annotated_status'"
     --fail-on-diagnostics
     --diagnostic-kind error
     --expected-exit-code 1)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/null_state_cpp_test.cmake")
 
 set(RETURNGUARD_PROJECT_RUNNER
     "${CMAKE_SOURCE_DIR}/scripts/returnguard_project.py")

@@ -37,6 +37,7 @@ namespace returnguard::internal {
 
 class CFGValueFlow;
 class HandlerFinder;
+class NullStateAnalysis;
 
 class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
   public:
@@ -110,6 +111,11 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] std::optional<CheckResult>
     analyze_flow_aliases(const clang::CallExpr* call, const Domain& domain);
 
+    [[nodiscard]] bool call_returns_nullable_pointer(const clang::CallExpr* call) const;
+    [[nodiscard]] NullStateAnalysis*
+    null_state_analysis(const clang::FunctionDecl* function);
+    void analyze_nullable_call(const clang::CallExpr* call);
+
     [[nodiscard]] std::string function_name(const clang::CallExpr* call) const;
     void emit(const clang::CallExpr* call, llvm::StringRef message,
               llvm::StringRef note = {}) const;
@@ -127,6 +133,9 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     std::unordered_map<const clang::FunctionDecl*, Domain> domain_cache_;
     std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<CFGValueFlow>> value_flow_cache_;
     std::unordered_set<const clang::FunctionDecl*> value_flow_failures_;
+    std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<NullStateAnalysis>>
+        null_state_cache_;
+    std::unordered_set<const clang::FunctionDecl*> null_state_failures_;
 };
 
 } // namespace returnguard::internal
