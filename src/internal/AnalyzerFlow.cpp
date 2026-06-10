@@ -38,6 +38,11 @@ bool contains_alias(const clang::Stmt* statement, const ExpressionSet& aliases) 
     return false;
 }
 
+bool is_alias_expression(const clang::Expr* expression, const ExpressionSet& aliases) {
+    const clang::Expr* canonical = strip_expr(expression);
+    return canonical != nullptr && aliases.contains(canonical);
+}
+
 class ResultAccumulator final {
   public:
     explicit ResultAccumulator(const Domain& domain)
@@ -183,7 +188,7 @@ class FlowHandlingFinder final
 
     bool TraverseReturnStmt(clang::ReturnStmt* statement) {
         if (occurs_after(statement->getReturnLoc()) &&
-            contains_alias(statement->getRetValue(), aliases_)) {
+            is_alias_expression(statement->getRetValue(), aliases_)) {
             accumulator_.mark_forwarded();
         }
         return clang::RecursiveASTVisitor<FlowHandlingFinder>::TraverseReturnStmt(statement);
