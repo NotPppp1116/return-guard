@@ -6,6 +6,7 @@
 #include <clang/AST/Type.h>
 #include <clang/Basic/SourceLocation.h>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -34,11 +35,13 @@ class StringRef;
 
 namespace returnguard::internal {
 
+class CFGValueFlow;
 class HandlerFinder;
 
 class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
   public:
     explicit Analyzer(clang::ASTContext& context);
+    ~Analyzer();
 
     [[nodiscard]] bool shouldVisitTemplateInstantiations() const;
     [[nodiscard]] bool shouldVisitImplicitCode() const;
@@ -52,8 +55,14 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] CheckResult analyze_if_chain(const clang::IfStmt* statement,
                                                const clang::VarDecl* variable,
                                                const Domain& domain) const;
+    [[nodiscard]] CheckResult analyze_if_chain(const clang::IfStmt* statement,
+                                               const ExpressionSet& aliases,
+                                               const Domain& domain) const;
     [[nodiscard]] CheckResult analyze_condition(const clang::Expr* condition,
                                                 const clang::VarDecl* variable,
+                                                const Domain& domain) const;
+    [[nodiscard]] CheckResult analyze_condition(const clang::Expr* condition,
+                                                const ExpressionSet& aliases,
                                                 const Domain& domain) const;
 
   private:
@@ -97,6 +106,10 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] bool call_is_discarded_expression(const clang::CallExpr* call) const;
     [[nodiscard]] bool call_is_operator(const clang::CallExpr* call) const;
 
+    [[nodiscard]] CFGValueFlow* value_flow(const clang::FunctionDecl* function);
+    [[nodiscard]] std::optional<CheckResult>
+    analyze_flow_aliases(const clang::CallExpr* call, const Domain& domain);
+
     [[nodiscard]] std::string function_name(const clang::CallExpr* call) const;
     void emit(const clang::CallExpr* call, llvm::StringRef message,
               llvm::StringRef note = {}) const;
@@ -112,6 +125,8 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     clang::ASTContext& context_;
     clang::SourceManager& source_manager_;
     std::unordered_map<const clang::FunctionDecl*, Domain> domain_cache_;
+    std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<CFGValueFlow>> value_flow_cache_;
+    std::unordered_set<const clang::FunctionDecl*> value_flow_failures_;
 };
 
 } // namespace returnguard::internal

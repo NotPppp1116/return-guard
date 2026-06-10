@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(returnguard VERSION 0.5.2 LANGUAGES C CXX)
+project(returnguard VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -80,9 +80,12 @@ add_executable(returnguard
     src/internal/AnalyzerControlFlow.cpp
     src/internal/AnalyzerDiagnostics.cpp
     src/internal/AnalyzerDomains.cpp
+    src/internal/AnalyzerFlow.cpp
+    src/internal/AnalyzerFlowControl.cpp
     src/internal/AnalyzerParents.cpp
     src/internal/AnalyzerSource.cpp
     src/internal/AstUtils.cpp
+    src/internal/CFGValueFlow.cpp
     src/internal/ConditionEvaluator.cpp
     src/internal/DomainUtils.cpp
     src/internal/HandlerFinder.cpp

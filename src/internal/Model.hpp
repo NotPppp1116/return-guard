@@ -4,9 +4,16 @@
 
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
+namespace clang {
+class Expr;
+}
+
 namespace returnguard::internal {
+
+using ExpressionSet = std::unordered_set<const clang::Expr*>;
 
 enum class Truth {
     False,

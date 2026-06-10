@@ -1,5 +1,7 @@
 #include "Analyzer.hpp"
 
+#include "CFGValueFlow.hpp"
+
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Expr.h>
 #include <clang/Basic/SourceManager.h>
@@ -8,6 +10,8 @@ namespace returnguard::internal {
 
 Analyzer::Analyzer(clang::ASTContext& context)
     : context_(context), source_manager_(context.getSourceManager()) {}
+
+Analyzer::~Analyzer() = default;
 
 bool Analyzer::shouldVisitTemplateInstantiations() const {
     return false;

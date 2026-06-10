@@ -12,6 +12,7 @@ namespace {
 struct EvaluationTarget {
     const clang::VarDecl* variable = nullptr;
     const clang::Expr* expression = nullptr;
+    const ExpressionSet* expressions = nullptr;
 };
 
 bool is_target_expression(const clang::Expr* expression, const EvaluationTarget& target) {
@@ -21,6 +22,10 @@ bool is_target_expression(const clang::Expr* expression, const EvaluationTarget&
     }
 
     if (target.expression != nullptr && expression == strip_expr(target.expression)) {
+        return true;
+    }
+
+    if (target.expressions != nullptr && target.expressions->contains(expression)) {
         return true;
     }
 
@@ -235,38 +240,72 @@ Truth compare_values(clang::BinaryOperatorKind opcode, const llvm::APSInt& lhs,
 
 SymbolicInteger symbolic_integer(const clang::Expr* expression, const clang::VarDecl* target,
                                  const clang::ASTContext& context) {
-    return symbolic_integer_impl(expression, {.variable = target, .expression = nullptr}, context);
+    return symbolic_integer_impl(
+        expression,
+        {.variable = target, .expression = nullptr, .expressions = nullptr},
+        context);
 }
 
 SymbolicInteger symbolic_integer(const clang::Expr* expression, const clang::Expr* target,
                                  const clang::ASTContext& context) {
-    return symbolic_integer_impl(expression, {.variable = nullptr, .expression = target}, context);
+    return symbolic_integer_impl(
+        expression,
+        {.variable = nullptr, .expression = target, .expressions = nullptr},
+        context);
 }
 
 Truth evaluate_condition_for_value(const clang::Expr* expression, const clang::VarDecl* target,
                                    const llvm::APSInt& target_value,
                                    const clang::ASTContext& context) {
-    return evaluate_impl(expression, {.variable = target, .expression = nullptr}, target_value,
-                         context);
+    return evaluate_impl(
+        expression,
+        {.variable = target, .expression = nullptr, .expressions = nullptr},
+        target_value,
+        context);
 }
 
 Truth evaluate_condition_for_value(const clang::Expr* expression, const clang::Expr* target,
                                    const llvm::APSInt& target_value,
                                    const clang::ASTContext& context) {
-    return evaluate_impl(expression, {.variable = nullptr, .expression = target}, target_value,
-                         context);
+    return evaluate_impl(
+        expression,
+        {.variable = nullptr, .expression = target, .expressions = nullptr},
+        target_value,
+        context);
+}
+
+Truth evaluate_condition_for_value(const clang::Expr* expression, const ExpressionSet& targets,
+                                   const llvm::APSInt& target_value,
+                                   const clang::ASTContext& context) {
+    return evaluate_impl(
+        expression,
+        {.variable = nullptr, .expression = nullptr, .expressions = &targets},
+        target_value,
+        context);
 }
 
 bool is_guard_condition(const clang::Expr* expression, const clang::VarDecl* target,
                         const clang::ASTContext& context) {
-    return is_guard_condition_impl(expression, {.variable = target, .expression = nullptr},
-                                   context);
+    return is_guard_condition_impl(
+        expression,
+        {.variable = target, .expression = nullptr, .expressions = nullptr},
+        context);
 }
 
 bool is_guard_condition(const clang::Expr* expression, const clang::Expr* target,
                         const clang::ASTContext& context) {
-    return is_guard_condition_impl(expression, {.variable = nullptr, .expression = target},
-                                   context);
+    return is_guard_condition_impl(
+        expression,
+        {.variable = nullptr, .expression = target, .expressions = nullptr},
+        context);
+}
+
+bool is_guard_condition(const clang::Expr* expression, const ExpressionSet& targets,
+                        const clang::ASTContext& context) {
+    return is_guard_condition_impl(
+        expression,
+        {.variable = nullptr, .expression = nullptr, .expressions = &targets},
+        context);
 }
 
 } // namespace returnguard::internal

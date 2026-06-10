@@ -11,11 +11,21 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
 
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace returnguard::internal {
+namespace {
+
+CheckResult exhaustive_result() {
+    CheckResult result;
+    result.kind = HandlingKind::ExhaustivelyChecked;
+    return result;
+}
+
+} // namespace
 
 CheckResult Analyzer::analyze_variable(const clang::CallExpr* call, const clang::VarDecl* variable,
                                        const Domain& domain) {
@@ -32,9 +42,7 @@ CheckResult Analyzer::analyze_variable(const clang::CallExpr* call, const clang:
     finder.TraverseStmt(const_cast<clang::Stmt*>(function->getBody()));
 
     if (finder.exhaustive()) {
-        CheckResult result;
-        result.kind = HandlingKind::ExhaustivelyChecked;
-        return result;
+        return exhaustive_result();
     }
 
     if (finder.forwarded()) {
@@ -93,29 +101,49 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
         return analyze_direct_condition(condition, call, domain, context_);
     }
 
-    if (const clang::Expr* condition = enclosing_direct_conditional_condition(call)) {
-        return analyze_direct_fallback_condition(condition, call, domain, context_);
+    if (enclosing_direct_conditional_condition(call) != nullptr) {
+        return exhaustive_result();
     }
 
     if (const clang::VarDecl* variable = variable_initialized_by_call(call)) {
-        return analyze_variable(call, variable, domain);
+        CheckResult result = analyze_variable(call, variable, domain);
+        if (result.kind == HandlingKind::ExhaustivelyChecked ||
+            result.kind == HandlingKind::Forwarded) {
+            return result;
+        }
+        if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
+            return *flow;
+        }
+        return result;
     }
 
     if (const clang::VarDecl* variable = variable_assigned_from_call(call)) {
-        if (const clang::Expr* condition =
-                enclosing_assignment_conditional_condition(call, variable)) {
-            return analyze_condition(condition, variable, domain);
+        if (enclosing_assignment_conditional_condition(call, variable) != nullptr) {
+            return exhaustive_result();
         }
         if (const clang::Expr* condition = enclosing_assignment_condition(call, variable)) {
             return analyze_condition(condition, variable, domain);
         }
-        return analyze_variable(call, variable, domain);
+
+        CheckResult result = analyze_variable(call, variable, domain);
+        if (result.kind == HandlingKind::ExhaustivelyChecked ||
+            result.kind == HandlingKind::Forwarded) {
+            return result;
+        }
+        if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
+            return *flow;
+        }
+        return result;
     }
 
     if (call_is_forwarded(call)) {
         CheckResult result;
         result.kind = HandlingKind::Forwarded;
         return result;
+    }
+
+    if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
+        return *flow;
     }
 
     if (call_is_discarded_expression(call)) {

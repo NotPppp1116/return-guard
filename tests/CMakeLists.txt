@@ -22,16 +22,14 @@ add_returnguard_test(
     --expect "int status = CALL_STATUS();"
     --reject "status_api.h:")
 add_returnguard_test(returnguard.enums enums.c practical 1 "missing STATUS_DENIED")
-add_returnguard_test(returnguard.integers integers.c strict 1 "checks do not have a final else/default")
+add_returnguard_test(returnguard.integers integers.c strict 1 "conditional checks through an alias have no final else")
 add_returnguard_test(returnguard.if_chains if_chains.c practical 1 "missing 32")
 add_returnguard_test(returnguard.direct_if direct_if.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.loop_conditions loop_conditions.c practical 2 "missing 32")
 add_returnguard_test(returnguard.assignment_conditions assignment_conditions.c practical 2 "missing 32")
 add_returnguard_test(
-    returnguard.conditional_expressions conditional_expressions.c strict 5
-    "consumed but not verified"
-    --expect "missing 4, 32"
-    --expect "missing 32")
+    returnguard.conditional_expressions conditional_expressions.c strict 1
+    "consumed but not verified")
 add_returnguard_test(returnguard.guard_clauses guard_clauses.c strict 1 "missing 4, 32")
 add_returnguard_test(returnguard.complex_guard_clauses complex_guard_clauses.c strict 1 "missing 4, 32")
 add_returnguard_test(returnguard.noreturn_guards noreturn_guards.c strict 1 "missing 1")
@@ -51,6 +49,7 @@ add_returnguard_test(returnguard.annotation_redeclaration annotation_redeclarati
 add_returnguard_test(returnguard.switches switches.c strict 1 "open-ended")
 add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value of 'annotated_status'")
 add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4, 32")
+add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
 add_returnguard_test(
     returnguard.fail_on_diagnostics ignored.c ignored-only 1
     "return value of 'annotated_status'"
