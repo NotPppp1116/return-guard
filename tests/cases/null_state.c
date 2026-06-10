@@ -90,6 +90,30 @@ int reassigned_before_use(void) {
     return item->value;
 }
 
+int replaced_on_null(void) {
+    struct item fallback = {42};
+    struct item* item = nullable_item();
+    if (item == NULL) {
+        item = &fallback;
+    }
+    return item->value;
+}
+
+int guarded_conditional_origin(int choose_nullable) {
+    struct item fallback = {42};
+    struct item* item = choose_nullable ? nullable_item() : &fallback;
+    if (item == NULL) {
+        return 0;
+    }
+    return item->value;
+}
+
+int unchecked_conditional_origin(int choose_nullable) {
+    struct item fallback = {42};
+    struct item* item = choose_nullable ? nullable_item() : &fallback;
+    return item->value;
+}
+
 int unchecked_native_nullability(void) {
     struct item* item = native_nullable_item();
     return item->value;
