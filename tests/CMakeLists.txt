@@ -51,6 +51,10 @@ add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value 
 add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
 add_returnguard_test(
+    returnguard.null_state null_state.c practical 7
+    "is dereferenced without a prior null check"
+    --expect "pointer returned here is marked nullable")
+add_returnguard_test(
     returnguard.fail_on_diagnostics ignored.c ignored-only 1
     "return value of 'annotated_status'"
     --fail-on-diagnostics
