@@ -61,10 +61,21 @@ struct State {
         values[declaration] = value;
     }
 
-    void refine(NullState null_state) {
+    void refine(
+        const clang::ValueDecl* subject,
+        NullState null_state) {
+        if (subject != nullptr) {
+            PointerFact subject_fact = fact(subject);
+            if (subject_fact.origin == Origin::Maybe) {
+                subject_fact.null_state = null_state;
+                set(subject, subject_fact);
+                return;
+            }
+        }
+
         for (auto& [declaration, value] : values) {
             (void)declaration;
-            if (value.origin != Origin::No) {
+            if (value.origin == Origin::Yes) {
                 value.null_state = null_state;
             }
         }
@@ -167,8 +178,17 @@ PointerFact fact_for_expression(
     return {};
 }
 
+const clang::ValueDecl* lvalue_declaration(const clang::Expr* expression) {
+    expression = strip_expr(expression);
+    const auto* reference = llvm::dyn_cast_or_null<clang::DeclRefExpr>(expression);
+    return reference == nullptr
+               ? nullptr
+               : llvm::dyn_cast<clang::ValueDecl>(reference->getDecl());
+}
+
 struct BranchConstraint {
     bool recognized = false;
+    const clang::ValueDecl* subject = nullptr;
     NullState true_state = NullState::MaybeNull;
     NullState false_state = NullState::MaybeNull;
 };
@@ -200,6 +220,7 @@ BranchConstraint condition_constraint(
     if (direct.origin != Origin::No && expression->getType()->isPointerType()) {
         return {
             .recognized = true,
+            .subject = lvalue_declaration(expression),
             .true_state = NullState::NonNull,
             .false_state = NullState::Null,
         };
@@ -214,31 +235,30 @@ BranchConstraint condition_constraint(
 
     const PointerFact lhs = fact_for_expression(binary->getLHS(), state, target);
     const PointerFact rhs = fact_for_expression(binary->getRHS(), state, target);
-    const bool target_and_null =
-        (lhs.origin != Origin::No && is_null_pointer_constant(binary->getRHS(), context)) ||
-        (rhs.origin != Origin::No && is_null_pointer_constant(binary->getLHS(), context));
-    if (!target_and_null) {
+    const clang::Expr* subject_expression = nullptr;
+    if (lhs.origin != Origin::No &&
+        is_null_pointer_constant(binary->getRHS(), context)) {
+        subject_expression = binary->getLHS();
+    } else if (rhs.origin != Origin::No &&
+               is_null_pointer_constant(binary->getLHS(), context)) {
+        subject_expression = binary->getRHS();
+    }
+    if (subject_expression == nullptr) {
         return {};
     }
 
     if (binary->getOpcode() == clang::BO_NE) {
         return {
             .recognized = true,
+            .subject = lvalue_declaration(subject_expression),
             .true_state = NullState::NonNull,
             .false_state = NullState::Null,
         };
     }
     return {
         .recognized = true,
+        .subject = lvalue_declaration(subject_expression),
         .true_state = NullState::Null,
         .false_state = NullState::NonNull,
     };
-}
-
-const clang::ValueDecl* lvalue_declaration(const clang::Expr* expression) {
-    expression = strip_expr(expression);
-    const auto* reference = llvm::dyn_cast_or_null<clang::DeclRefExpr>(expression);
-    return reference == nullptr
-               ? nullptr
-               : llvm::dyn_cast<clang::ValueDecl>(reference->getDecl());
 }
