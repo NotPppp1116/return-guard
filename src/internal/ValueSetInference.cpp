@@ -3,15 +3,16 @@
 #include "Analyzer.hpp"
 #include "AstUtils.hpp"
 #include "DomainUtils.hpp"
+#include "ReachingDefinitions.hpp"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
-#include <clang/AST/Stmt.h>
 #include <llvm/ADT/APSInt.h>
 #include <llvm/Support/Casting.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <unordered_set>
 #include <vector>
 
@@ -58,12 +59,12 @@ std::optional<Domain> ValueSetInference::infer_expression(
             infer_expression(conditional->getFalseExpr(), active_functions, active_variables);
         if (true_domain && true_domain->finite && false_domain && false_domain->finite) {
             Domain combined = *true_domain;
-            for (const auto& val : false_domain->values) {
-                for (const auto& label : val.labels) {
-                    add_domain_value(combined, val.value, label);
+            for (const auto& value : false_domain->values) {
+                for (const auto& label : value.labels) {
+                    add_domain_value(combined, value.value, label);
                 }
-                if (val.labels.empty()) {
-                    add_domain_value(combined, val.value, "");
+                if (value.labels.empty()) {
+                    add_domain_value(combined, value.value, "");
                 }
             }
             combined.inferred_from_body = true;
@@ -73,9 +74,9 @@ std::optional<Domain> ValueSetInference::infer_expression(
 
     if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expression)) {
         if (const auto* callee = call->getDirectCallee()) {
-            Domain d = analyzer_.function_domain(callee, active_functions);
-            if (d.finite) {
-                return d;
+            Domain domain = analyzer_.function_domain(callee, active_functions);
+            if (domain.finite) {
+                return domain;
             }
         }
     }
@@ -108,60 +109,63 @@ ValueSetInference::infer_binary(const clang::BinaryOperator* binary,
     result.inferred_from_body = true;
     result.type_name = binary->getType().getAsString();
 
-    for (const auto& l : lhs->values) {
-        for (const auto& r : rhs->values) {
-            llvm::APSInt val = l.value;
+    for (const auto& left : lhs->values) {
+        for (const auto& right : rhs->values) {
+            llvm::APSInt value = left.value;
             switch (binary->getOpcode()) {
             case clang::BO_Add:
-                val += r.value;
+                value += right.value;
                 break;
             case clang::BO_Sub:
-                val -= r.value;
+                value -= right.value;
                 break;
             case clang::BO_Mul:
-                val *= r.value;
+                value *= right.value;
                 break;
             case clang::BO_Div:
-                if (r.value == 0)
+                if (right.value == 0) {
                     return std::nullopt;
-                val /= r.value;
+                }
+                value /= right.value;
                 break;
             case clang::BO_Rem:
-                if (r.value == 0)
+                if (right.value == 0) {
                     return std::nullopt;
-                val %= r.value;
+                }
+                value %= right.value;
                 break;
             case clang::BO_And:
-                val &= r.value;
+                value &= right.value;
                 break;
             case clang::BO_Or:
-                val |= r.value;
+                value |= right.value;
                 break;
             case clang::BO_Xor:
-                val ^= r.value;
+                value ^= right.value;
                 break;
             case clang::BO_Shl:
             case clang::BO_Shr: {
-                int64_t shift = r.value.getExtValue();
-                if (shift < 0 || static_cast<uint64_t>(shift) >= val.getBitWidth()) {
+                const int64_t shift = right.value.getExtValue();
+                if (shift < 0 || static_cast<uint64_t>(shift) >= value.getBitWidth()) {
                     return std::nullopt;
                 }
                 if (binary->getOpcode() == clang::BO_Shl) {
-                    val <<= static_cast<unsigned>(shift);
+                    value <<= static_cast<unsigned>(shift);
                 } else {
-                    val >>= static_cast<unsigned>(shift);
+                    value >>= static_cast<unsigned>(shift);
                 }
                 break;
             }
             default:
                 return std::nullopt;
             }
-            add_domain_value(result, val, "");
+            add_domain_value(result, value, "");
+            if (result.values.size() > 128U) {
+                return std::nullopt;
+            }
         }
     }
 
-    if (result.values.size() > 128)
-        return std::nullopt; // Safety limit
     return result;
 }
 
@@ -169,8 +173,8 @@ std::optional<Domain>
 ValueSetInference::infer_unary(const clang::UnaryOperator* unary,
                                std::unordered_set<const clang::FunctionDecl*>& active_functions,
                                std::unordered_set<const clang::VarDecl*>& active_variables) {
-    auto sub = infer_expression(unary->getSubExpr(), active_functions, active_variables);
-    if (!sub || !sub->finite) {
+    auto operand = infer_expression(unary->getSubExpr(), active_functions, active_variables);
+    if (!operand || !operand->finite) {
         return std::nullopt;
     }
 
@@ -179,114 +183,87 @@ ValueSetInference::infer_unary(const clang::UnaryOperator* unary,
     result.inferred_from_body = true;
     result.type_name = unary->getType().getAsString();
 
-    for (const auto& s : sub->values) {
-        llvm::APSInt val = s.value;
+    for (const auto& source : operand->values) {
+        llvm::APSInt value = source.value;
         switch (unary->getOpcode()) {
         case clang::UO_Minus:
-            val = -val;
+            value = -value;
             break;
         case clang::UO_Plus:
             break;
         case clang::UO_Not:
-            val = ~val;
+            value = ~value;
             break;
         case clang::UO_LNot:
-            val = llvm::APSInt(llvm::APInt(1U, val == 0 ? 1U : 0U), false);
+            value = llvm::APSInt(llvm::APInt(1U, value == 0 ? 1U : 0U), false);
             break;
         default:
             return std::nullopt;
         }
-        add_domain_value(result, val, "");
+        add_domain_value(result, value, "");
     }
 
     return result;
 }
 
-namespace {
-class SimpleAssignmentFinder : public clang::RecursiveASTVisitor<SimpleAssignmentFinder> {
-  public:
-    SimpleAssignmentFinder(const clang::VarDecl* target) : target_(target) {}
-    bool VisitBinaryOperator(clang::BinaryOperator* op) {
-        if (op->isAssignmentOp() && referenced_variable(op->getLHS()) == target_) {
-            if (op->getOpcode() == clang::BO_Assign) {
-                assignments_.push_back(op->getRHS());
-            } else {
-                valid_ = false;
-            }
-        }
-        return true;
-    }
-    bool VisitUnaryOperator(clang::UnaryOperator* op) {
-        if (op->isIncrementDecrementOp() && referenced_variable(op->getSubExpr()) == target_) {
-            valid_ = false;
-        }
-        return true;
-    }
-    bool valid_ = true;
-    std::vector<const clang::Expr*> assignments_;
-    const clang::VarDecl* target_;
-};
-} // namespace
-
 std::optional<Domain>
 ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::Expr* reference_site,
                                   std::unordered_set<const clang::FunctionDecl*>& active_functions,
                                   std::unordered_set<const clang::VarDecl*>& active_variables) {
-    if (llvm::isa<clang::ParmVarDecl>(variable)) {
-        return std::nullopt;
-    }
-
-    if (!variable->isLocalVarDecl()) {
+    if (variable == nullptr || reference_site == nullptr ||
+        llvm::isa<clang::ParmVarDecl>(variable) || !variable->isLocalVarDecl() ||
+        variable->getType().isVolatileQualified()) {
         return std::nullopt;
     }
 
     if (active_variables.contains(variable)) {
         return std::nullopt;
     }
+
+    const auto* function = llvm::dyn_cast<clang::FunctionDecl>(variable->getDeclContext());
+    if (function == nullptr || !function->hasBody()) {
+        return std::nullopt;
+    }
+
+    const ReachingDefinitions reaching =
+        reaching_definitions_at(*function, *variable, *reference_site,
+                                const_cast<clang::ASTContext&>(context_));
+    if (reaching.unknown || reaching.expressions.empty()) {
+        return std::nullopt;
+    }
+
     active_variables.insert(variable);
-
-    const clang::DeclContext* dc = variable->getDeclContext();
-    const auto* function = llvm::dyn_cast_or_null<clang::FunctionDecl>(dc);
-    if (!function || !function->hasBody()) {
-        active_variables.erase(variable);
-        return std::nullopt;
-    }
-
-    SimpleAssignmentFinder finder(variable);
-    if (variable->hasInit()) {
-        finder.assignments_.push_back(variable->getInit());
-    }
-    finder.TraverseStmt(const_cast<clang::Stmt*>(function->getBody()));
-
-    if (!finder.valid_ || finder.assignments_.empty()) {
-        active_variables.erase(variable);
-        return std::nullopt;
-    }
 
     Domain combined;
     combined.finite = true;
     combined.inferred_from_body = true;
     combined.type_name = variable->getType().getAsString();
 
-    for (const auto* assignment : finder.assignments_) {
-        auto part = infer_expression(assignment, active_functions, active_variables);
+    for (const clang::Expr* definition : reaching.expressions) {
+        std::optional<Domain> part =
+            infer_expression(definition, active_functions, active_variables);
         if (!part || !part->finite) {
             combined.finite = false;
             break;
         }
-        for (const auto& val : part->values) {
-            for (const auto& label : val.labels) {
-                add_domain_value(combined, val.value, label);
+        for (const auto& value : part->values) {
+            for (const auto& label : value.labels) {
+                add_domain_value(combined, value.value, label);
             }
-            if (val.labels.empty()) {
-                add_domain_value(combined, val.value, "");
+            if (value.labels.empty()) {
+                add_domain_value(combined, value.value, "");
             }
+        }
+        if (combined.values.size() > 128U) {
+            combined.finite = false;
+            break;
         }
     }
 
     active_variables.erase(variable);
-    if (combined.finite)
+    if (combined.finite && !combined.values.empty()) {
         return combined;
+    }
     return std::nullopt;
 }
 
