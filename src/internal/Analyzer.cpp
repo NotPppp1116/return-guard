@@ -23,9 +23,8 @@ bool Analyzer::shouldVisitImplicitCode() const {
 }
 
 bool Analyzer::VisitCallExpr(clang::CallExpr* call) {
-    if (!analyze_nullable_call(call)) {
-        analyze_call(call);
-    }
+    analyze_nullable_call(call);
+    analyze_call(call);
     return true;
 }
 
