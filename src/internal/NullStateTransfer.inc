@@ -204,8 +204,7 @@ void transfer_block(
         }
     }
 
-    if (const auto* condition =
-            llvm::dyn_cast_or_null<clang::Expr>(block.getTerminatorCondition())) {
+    if (const clang::Expr* condition = block.getLastCondition()) {
         transfer.evaluate(condition);
     }
 }
@@ -220,10 +219,8 @@ State state_for_successor(
         return state;
     }
 
-    const auto* condition =
-        llvm::dyn_cast_or_null<clang::Expr>(block.getTerminatorCondition());
     const BranchConstraint constraint =
-        condition_constraint(condition, state, target, context);
+        condition_constraint(block.getLastCondition(), state, target, context);
     if (!constraint.recognized) {
         return state;
     }
