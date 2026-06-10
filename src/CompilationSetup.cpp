@@ -194,8 +194,13 @@ bool database_contains_source(
 
 bool has_resource_directory(
     const clang::tooling::CommandLineArguments& arguments) {
+    auto first = arguments.begin();
+    if (first != arguments.end()) {
+        ++first;
+    }
+
     return std::any_of(
-        arguments.begin() + std::min<size_t>(1, arguments.size()),
+        first,
         arguments.end(),
         [](const std::string& argument) {
             const llvm::StringRef value(argument);
