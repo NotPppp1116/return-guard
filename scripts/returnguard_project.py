@@ -177,6 +177,21 @@ def parse_extensions(value: str) -> frozenset[str]:
     return frozenset(extensions)
 
 
+def parse_scan_excluded_directories(values: Sequence[str]) -> frozenset[str]:
+    directories: set[str] = set(DEFAULT_SCAN_EXCLUDED_DIRS)
+    for value in values:
+        for item in value.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if item in {".", ".."} or "/" in item or "\\" in item:
+                raise RunnerError(
+                    "--scan-exclude-dir values must be directory basenames"
+                )
+            directories.add(item)
+    return frozenset(directories)
+
+
 def scan_compile_arguments_for_source(
     source: pathlib.Path,
     values: Sequence[str],
@@ -377,6 +392,15 @@ def parser() -> argparse.ArgumentParser:
             "includes, defines, and language options"
         ),
     )
+    result.add_argument(
+        "--scan-exclude-dir",
+        action="append",
+        default=[],
+        help=(
+            "directory basename to skip during source-root scans; repeat or "
+            "use comma-separated names"
+        ),
+    )
     return result
 
 
@@ -426,6 +450,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             all_units = discover_translation_units(
                 source_roots,
                 compile_arguments=arguments.compile_arg,
+                excluded_directories=parse_scan_excluded_directories(
+                    arguments.scan_exclude_dir,
+                ),
             )
             database_directory = None
             default_shard_root = source_roots[0]

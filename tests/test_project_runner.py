@@ -148,6 +148,45 @@ class ProjectRunnerTests(unittest.TestCase):
             lines = [pathlib.Path(line).name for line in completed.stdout.splitlines()]
             self.assertEqual(lines, ["alpha.c", "beta.cpp"])
 
+    def test_source_root_scan_accepts_extra_excluded_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "src"
+            vendor = source / "vendor"
+            generated = source / "generated"
+            vendor.mkdir(parents=True)
+            generated.mkdir()
+            (source / "alpha.c").write_text("int alpha;\n", encoding="utf-8")
+            (vendor / "vendored.c").write_text("int vendored;\n", encoding="utf-8")
+            (generated / "output.c").write_text("int output;\n", encoding="utf-8")
+
+            completed = self.run_runner(
+                "--source-root",
+                str(root),
+                "--scan-exclude-dir",
+                "vendor,generated",
+                "--list-files",
+            )
+
+            lines = [pathlib.Path(line).name for line in completed.stdout.splitlines()]
+            self.assertEqual(lines, ["alpha.c"])
+
+    def test_source_root_scan_rejects_excluded_directory_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "src").mkdir()
+
+            completed = self.run_runner(
+                "--source-root",
+                str(root),
+                "--scan-exclude-dir",
+                "vendor/generated",
+                "--list-files",
+                expected_code=2,
+            )
+
+            self.assertIn("directory basenames", completed.stderr)
+
     def test_source_root_dry_run_uses_compile_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
