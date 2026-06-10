@@ -28,10 +28,8 @@ add_returnguard_test(returnguard.direct_if direct_if.c practical 1 "missing 4, 3
 add_returnguard_test(returnguard.loop_conditions loop_conditions.c practical 2 "missing 32")
 add_returnguard_test(returnguard.assignment_conditions assignment_conditions.c practical 2 "missing 32")
 add_returnguard_test(
-    returnguard.conditional_expressions conditional_expressions.c strict 5
-    "consumed but not verified"
-    --expect "missing 4, 32"
-    --expect "missing 32")
+    returnguard.conditional_expressions conditional_expressions.c strict 1
+    "consumed but not verified")
 add_returnguard_test(returnguard.guard_clauses guard_clauses.c strict 1 "missing 4, 32")
 add_returnguard_test(returnguard.complex_guard_clauses complex_guard_clauses.c strict 1 "missing 4, 32")
 add_returnguard_test(returnguard.noreturn_guards noreturn_guards.c strict 1 "missing 1")
