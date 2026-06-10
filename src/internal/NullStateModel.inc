@@ -95,7 +95,7 @@ bool is_null_pointer_constant(
     const clang::ASTContext& context) {
     return expression != nullptr &&
            expression->isNullPointerConstant(
-               context,
+               const_cast<clang::ASTContext&>(context),
                clang::Expr::NPC_ValueDependentIsNotNull) !=
                clang::Expr::NPCK_NotNull;
 }
