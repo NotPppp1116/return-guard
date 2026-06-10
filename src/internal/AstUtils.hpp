@@ -1,6 +1,7 @@
 #pragma once
 
 #include <llvm/ADT/APSInt.h>
+#include <llvm/ADT/StringExtras.h>
 
 #include <optional>
 

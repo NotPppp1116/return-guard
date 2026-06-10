@@ -44,6 +44,8 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     explicit Analyzer(clang::ASTContext& context);
     ~Analyzer();
 
+    void prepare_translation_unit();
+
     [[nodiscard]] bool shouldVisitTemplateInstantiations() const;
     [[nodiscard]] bool shouldVisitImplicitCode() const;
     bool VisitCallExpr(clang::CallExpr* call);
@@ -93,6 +95,7 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] Domain enum_domain(const clang::EnumDecl* declaration) const;
     [[nodiscard]] Domain type_domain(clang::QualType type) const;
     [[nodiscard]] Domain annotation_domain(const clang::FunctionDecl* function) const;
+    [[nodiscard]] Domain infer_function_domain_once(const clang::FunctionDecl* function);
 
     [[nodiscard]] const clang::VarDecl*
     variable_initialized_by_call(const clang::CallExpr* call) const;
@@ -123,6 +126,7 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] bool is_nullable_function_impl(
         const clang::FunctionDecl* function,
         std::unordered_set<const clang::FunctionDecl*>& active) const;
+    [[nodiscard]] bool infer_nullable_function_once(const clang::FunctionDecl* function) const;
     [[nodiscard]] NullStateAnalysis*
     null_state_analysis(const clang::FunctionDecl* function) const;
     void analyze_nullable_call(const clang::CallExpr* call);
@@ -143,6 +147,7 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     clang::ASTContext& context_;
     clang::SourceManager& source_manager_;
     std::unordered_map<const clang::FunctionDecl*, Domain> domain_cache_;
+    std::unordered_map<const clang::FunctionDecl*, bool> domain_complete_;
     std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<CFGValueFlow>> value_flow_cache_;
     std::unordered_set<const clang::FunctionDecl*> value_flow_failures_;
     mutable std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<NullStateAnalysis>>
@@ -151,6 +156,15 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     mutable std::unordered_map<const clang::FunctionDecl*, bool> nullable_cache_;
     mutable std::unordered_set<const clang::FunctionDecl*> active_nullable_checks_;
     mutable std::vector<std::pair<const clang::FunctionDecl*, unsigned>> active_parameter_checks_;
+
+    std::vector<const clang::FunctionDecl*> summary_functions_;
+    std::unordered_map<const clang::FunctionDecl*, std::vector<const clang::FunctionDecl*>>
+        summary_callers_;
+    bool summaries_prepared_ = false;
+    bool summaries_building_ = false;
+    bool collecting_domain_values_ = false;
+    bool validating_domain_completeness_ = false;
+    mutable const clang::FunctionDecl* nullable_recompute_target_ = nullptr;
 };
 
 } // namespace returnguard::internal

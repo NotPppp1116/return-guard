@@ -15,19 +15,20 @@ namespace returnguard {
 namespace {
 
 class Consumer final : public clang::ASTConsumer {
-public:
+  public:
     explicit Consumer(clang::ASTContext& context) : analyzer_(context) {}
 
     void HandleTranslationUnit(clang::ASTContext& context) override {
+        analyzer_.prepare_translation_unit();
         analyzer_.TraverseDecl(context.getTranslationUnitDecl());
     }
 
-private:
+  private:
     internal::Analyzer analyzer_;
 };
 
 class Action final : public clang::ASTFrontendAction {
-public:
+  public:
     std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(
         clang::CompilerInstance& compiler,
         llvm::StringRef) override {

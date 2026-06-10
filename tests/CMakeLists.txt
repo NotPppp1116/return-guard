@@ -97,6 +97,12 @@ add_returnguard_test(
     returnguard.complex_shift_overflow complex_shift_overflow.c practical 1
     "signed left shift")
 add_returnguard_test(
+    returnguard.interprocedural_summaries interprocedural_summaries.c practical 3
+    "is dereferenced without a prior null check"
+    --expect "missing 2")
+add_returnguard_clean_test(
+    returnguard.realloc_semantics realloc_semantics.c practical)
+add_returnguard_test(
     returnguard.null_state null_state.c practical 10
     "is dereferenced without a prior null check"
     --expect "pointer returned here is marked nullable")
