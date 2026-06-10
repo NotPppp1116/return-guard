@@ -103,7 +103,6 @@ bool Instrumentation::wrap_call(const clang::CallExpr* call,
     clang::SourceLocation begin = call->getBeginLoc();
     clang::SourceLocation end = call->getEndLoc();
 
-    /* Rewriting macro bodies or expansions can silently change unrelated code. */
     if (begin.isInvalid() || end.isInvalid() || begin.isMacroID() || end.isMacroID()) {
         return false;
     }
@@ -145,8 +144,8 @@ std::uint32_t Instrumentation::site_id(const clang::CallExpr* call) const {
                             std::to_string(source_manager.getFileOffset(location));
 
     std::uint32_t hash = 2166136261u;
-    for (const unsigned char character : key) {
-        hash ^= character;
+    for (const char character : key) {
+        hash ^= static_cast<unsigned char>(character);
         hash *= 16777619u;
     }
     return hash == 0u ? 1u : hash;
