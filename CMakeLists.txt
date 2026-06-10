@@ -175,6 +175,10 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS returnguard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(
+    DIRECTORY include/returnguard
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
     PROGRAMS scripts/returnguard_project.py
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     RENAME returnguard-project
