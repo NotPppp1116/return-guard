@@ -1,11 +1,12 @@
-# ReturnGuard C
+# ReturnGuard C/C++
 
-ReturnGuard is a standalone Clang LibTooling analyzer for C call-site return
+ReturnGuard is a standalone Clang LibTooling analyzer for C and C++ call-site return
 handling. It reports non-`void` calls whose result is ignored, consumed without
 verification, or only partially checked.
 
 The analyzer executable is implemented in C++ because Clang's native tooling
-API is C++, but the analyzed source is ordinary C (`.c` and `.h`).
+API is C++. It can analyze ordinary C (`.c` and `.h`) and C++ (`.cc`, `.cpp`,
+and `.cxx`) translation units.
 
 ## What it currently understands
 
@@ -114,7 +115,7 @@ Run the regression tests:
 ctest --test-dir build --output-on-failure
 ```
 
-## Run on one C file
+## Run on one file
 
 ```sh
 ./build/returnguard tests/cases/macros.c -- \
@@ -123,6 +124,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 Arguments after `--` are passed to Clang as compilation arguments.
+For C++ files, pass the project's C++ frontend flags, for example
+`-std=c++20`.
 
 ## Run against a CMake project
 
@@ -139,7 +142,7 @@ Then reuse its exact compilation command:
 ./build/returnguard \
     --mode=strict \
     -p /path/to/project/build \
-    /path/to/project/src/main.c
+    /path/to/project/src/main.cpp
 ```
 
 For large compilation databases, install and use `returnguard-project`; see
@@ -183,7 +186,7 @@ enum error load_file(void);
 
 ## Important limitations
 
-This is not a complete proof system for C.
+This is not a complete proof system for C or C++.
 
 - An arbitrary `int` function can return more values than static analysis can
   enumerate. Visible integer-returning bodies are not treated as closed finite

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
 import subprocess
 import sys
 
@@ -40,7 +41,7 @@ def main() -> int:
         [
             args.source,
             "--",
-            "-std=c17",
+            "-std=c++20" if pathlib.Path(args.source).suffix == ".cpp" else "-std=c17",
             f"-I{args.include}",
         ]
     )

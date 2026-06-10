@@ -11,7 +11,7 @@ Generate `compile_commands.json` first:
 cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 ```
 
-Then run the whole C project:
+Then run the whole C or C++ project:
 
 ```sh
 returnguard-project \
@@ -28,13 +28,13 @@ memory, so using every hardware thread is not always faster.
 
 ## Selecting work
 
-Only `.c` files are selected by default. The driver resolves relative paths,
-deduplicates repeated compilation-database entries, sorts them, and skips
-missing generated sources.
+`.c`, `.cc`, `.cpp`, and `.cxx` files are selected by default. The driver
+resolves relative paths, deduplicates repeated compilation-database entries,
+sorts them, and skips missing generated sources.
 
 ```sh
 returnguard-project -p build \
-    --extensions .c,.cc,.cpp \
+    --extensions .c,.cpp \
     --include-regex '/src/' \
     --exclude-regex '/generated/'
 ```

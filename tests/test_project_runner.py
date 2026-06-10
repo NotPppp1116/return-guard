@@ -89,12 +89,12 @@ class ProjectRunnerTests(unittest.TestCase):
         )
         return completed
 
-    def test_lists_deduplicated_c_translation_units(self) -> None:
+    def test_lists_deduplicated_c_and_cpp_translation_units(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             build = self.make_database(
                 root,
-                ["alpha.c", "beta.c", "ignored.cpp"],
+                ["alpha.c", "beta.c", "gamma.cpp", "ignored.py"],
                 duplicate_first=True,
             )
 
@@ -104,7 +104,7 @@ class ProjectRunnerTests(unittest.TestCase):
                 "--list-files",
             )
             lines = [pathlib.Path(line).name for line in completed.stdout.splitlines()]
-            self.assertEqual(lines, ["alpha.c", "beta.c"])
+            self.assertEqual(lines, ["alpha.c", "beta.c", "gamma.cpp"])
 
     def test_relative_database_directory_is_resolved_from_database(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -127,13 +127,14 @@ class ProjectRunnerTests(unittest.TestCase):
                 str((root / "src" / "relative.c").resolve()),
             )
 
-    def test_source_root_scan_lists_c_files_without_database(self) -> None:
+    def test_source_root_scan_lists_c_and_cpp_files_without_database(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             source = root / "src"
             source.mkdir()
             (source / "alpha.c").write_text("int alpha;\n", encoding="utf-8")
-            (source / "ignored.cpp").write_text("int ignored;\n", encoding="utf-8")
+            (source / "beta.cpp").write_text("int beta;\n", encoding="utf-8")
+            (source / "ignored.py").write_text("ignored = True\n", encoding="utf-8")
             build = root / "build"
             build.mkdir()
             (build / "generated.c").write_text("int generated;\n", encoding="utf-8")
@@ -145,7 +146,7 @@ class ProjectRunnerTests(unittest.TestCase):
             )
 
             lines = [pathlib.Path(line).name for line in completed.stdout.splitlines()]
-            self.assertEqual(lines, ["alpha.c"])
+            self.assertEqual(lines, ["alpha.c", "beta.cpp"])
 
     def test_source_root_dry_run_uses_compile_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -170,6 +171,18 @@ class ProjectRunnerTests(unittest.TestCase):
             self.assertIn("-- -std=c17", completed.stdout)
             self.assertIn(f"-I{include}", completed.stdout)
             self.assertNotIn(" -p ", completed.stdout)
+
+            (source / "two.cpp").write_text("int two;\n", encoding="utf-8")
+            cpp = self.run_runner(
+                "--source-root",
+                str(source),
+                "--tool",
+                str(tool),
+                "--dry-run",
+                "--extensions=.cpp",
+            )
+            self.assertIn(str(source / "two.cpp"), cpp.stdout)
+            self.assertIn("-- -std=c++20", cpp.stdout)
 
             custom_standard = self.run_runner(
                 "--source-root",
@@ -211,7 +224,7 @@ class ProjectRunnerTests(unittest.TestCase):
             root = pathlib.Path(directory)
             build = self.make_database(
                 root,
-                ["good.c", "bad.c", "ignored.cpp"],
+                ["good.c", "bad.c", "included.cpp", "ignored.py"],
             )
             tool = self.make_fake_tool(root, failing_name="bad.c")
 
@@ -228,8 +241,9 @@ class ProjectRunnerTests(unittest.TestCase):
             )
             self.assertIn("analyzed:good.c", completed.stdout)
             self.assertIn("analyzed:bad.c", completed.stdout)
-            self.assertNotIn("ignored.cpp", completed.stdout)
-            self.assertIn("2/2 translation units", completed.stderr)
+            self.assertIn("analyzed:included.cpp", completed.stdout)
+            self.assertNotIn("ignored.py", completed.stdout)
+            self.assertIn("3/3 translation units", completed.stderr)
             self.assertIn("1 failed", completed.stderr)
 
     def test_include_exclude_and_shards_are_deterministic(self) -> None:

@@ -27,9 +27,11 @@ from returnguard_project_runtime import (
 )
 
 
-DEFAULT_EXTENSIONS = (".c",)
+DEFAULT_EXTENSIONS = (".c", ".cc", ".cpp", ".cxx")
 DEFAULT_JOB_LIMIT = 8
-DEFAULT_SCAN_COMPILE_ARGUMENTS = ("-std=c17",)
+DEFAULT_SCAN_C_COMPILE_ARGUMENTS = ("-std=c17",)
+DEFAULT_SCAN_CXX_COMPILE_ARGUMENTS = ("-std=c++20",)
+CXX_EXTENSIONS = frozenset({".cc", ".cpp", ".cxx"})
 DEFAULT_SCAN_EXCLUDED_DIRS = frozenset(
     {
         ".cache",
@@ -142,7 +144,10 @@ def discover_translation_units(
                 source = (current_path / file_name).resolve(strict=False)
                 unique.setdefault(
                     str(source),
-                    TranslationUnit(source, arguments),
+                    TranslationUnit(
+                        source,
+                        scan_compile_arguments_for_source(source, arguments),
+                    ),
                 )
 
     return sorted(unique.values(), key=lambda unit: unit.source.as_posix())
@@ -172,7 +177,10 @@ def parse_extensions(value: str) -> frozenset[str]:
     return frozenset(extensions)
 
 
-def scan_compile_arguments(values: Sequence[str]) -> tuple[str, ...]:
+def scan_compile_arguments_for_source(
+    source: pathlib.Path,
+    values: Sequence[str],
+) -> tuple[str, ...]:
     arguments = tuple(values)
     has_language_standard = any(
         argument == "-std"
@@ -182,7 +190,12 @@ def scan_compile_arguments(values: Sequence[str]) -> tuple[str, ...]:
     )
     if has_language_standard:
         return arguments
-    return (*DEFAULT_SCAN_COMPILE_ARGUMENTS, *arguments)
+    defaults = (
+        DEFAULT_SCAN_CXX_COMPILE_ARGUMENTS
+        if source.suffix.lower() in CXX_EXTENSIONS
+        else DEFAULT_SCAN_C_COMPILE_ARGUMENTS
+    )
+    return (*defaults, *arguments)
 
 
 def shard_key(source: pathlib.Path, shard_root: pathlib.Path) -> str:
@@ -319,7 +332,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--extensions",
         default=",".join(DEFAULT_EXTENSIONS),
-        help="comma-separated source extensions (default: .c)",
+        help="comma-separated source extensions (default: .c,.cc,.cpp,.cxx)",
     )
     result.add_argument("--include-regex", action="append", default=[])
     result.add_argument("--exclude-regex", action="append", default=[])
@@ -410,10 +423,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not source_roots:
                 assert arguments.build_path is not None
                 source_roots = [arguments.build_path.expanduser().resolve(strict=False)]
-            compile_arguments = scan_compile_arguments(arguments.compile_arg)
             all_units = discover_translation_units(
                 source_roots,
-                compile_arguments=compile_arguments,
+                compile_arguments=arguments.compile_arg,
             )
             database_directory = None
             default_shard_root = source_roots[0]
