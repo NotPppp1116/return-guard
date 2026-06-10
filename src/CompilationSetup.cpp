@@ -166,7 +166,7 @@ std::vector<fs::path> database_candidates(const std::vector<fs::path>& sources) 
     return candidates;
 }
 
-bool database_contains_source(
+bool database_contains_all_sources(
     const fs::path& database_path,
     const std::unordered_set<std::string>& normalized_sources) {
     std::string error_message;
@@ -179,17 +179,22 @@ bool database_contains_source(
         return false;
     }
 
+    std::unordered_set<std::string> database_sources;
     for (const clang::tooling::CompileCommand& command :
          database->getAllCompileCommands()) {
         fs::path file(command.Filename);
         if (file.is_relative()) {
             file = fs::path(command.Directory) / file;
         }
-        if (normalized_sources.contains(normalized_path(file).string())) {
-            return true;
-        }
+        database_sources.insert(normalized_path(file).string());
     }
-    return false;
+
+    return std::all_of(
+        normalized_sources.begin(),
+        normalized_sources.end(),
+        [&database_sources](const std::string& source) {
+            return database_sources.contains(source);
+        });
 }
 
 bool has_resource_directory(
@@ -227,7 +232,7 @@ std::optional<std::string> discover_compilation_database(
     }
 
     for (const fs::path& candidate : database_candidates(sources)) {
-        if (database_contains_source(candidate, normalized_sources)) {
+        if (database_contains_all_sources(candidate, normalized_sources)) {
             return candidate.parent_path().string();
         }
     }
