@@ -180,6 +180,7 @@ class Transfer final {
         }
 
         if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expression)) {
+            propagate_memcpy_pointer_copy(call);
             if (call->getDirectCallee() == nullptr) {
                 const PointerFact callee = evaluate(call->getCallee());
                 diagnose(expression, callee);
@@ -211,6 +212,30 @@ class Transfer final {
             state_.set_expr(expression, value);
         }
         evaluate(expression);
+    }
+
+    const clang::ValueDecl* address_of_lvalue(const clang::Expr* expression) {
+        expression = strip_expr(expression);
+        const auto* unary = llvm::dyn_cast_or_null<clang::UnaryOperator>(expression);
+        if (unary == nullptr || unary->getOpcode() != clang::UO_AddrOf) {
+            return nullptr;
+        }
+        return lvalue_declaration(unary->getSubExpr());
+    }
+
+    void propagate_memcpy_pointer_copy(const clang::CallExpr* call) {
+        const clang::FunctionDecl* callee = call->getDirectCallee();
+        if (callee == nullptr || callee->getName() != "memcpy" || call->getNumArgs() < 2) {
+            return;
+        }
+
+        const clang::ValueDecl* destination = address_of_lvalue(call->getArg(0));
+        const clang::ValueDecl* source = address_of_lvalue(call->getArg(1));
+        if (destination == nullptr || source == nullptr ||
+            !destination->getType()->isPointerType()) {
+            return;
+        }
+        state_.set(destination, state_.fact(source));
     }
 
     void diagnose(const clang::Expr* expression, PointerFact pointer) {

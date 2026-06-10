@@ -17,6 +17,22 @@ function(add_returnguard_test name source mode warning_count expected_text)
     )
 endfunction()
 
+function(add_returnguard_clean_test name source mode)
+    add_test(
+        NAME ${name}
+        COMMAND
+            ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/run_expect.py"
+            --tool "$<TARGET_FILE:returnguard>"
+            --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/${source}"
+            --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            --include "${CMAKE_SOURCE_DIR}/include"
+            --mode "${mode}"
+            --warning-count 0
+            ${ARGN}
+    )
+endfunction()
+
 add_returnguard_test(
     returnguard.macros macros.c practical 1 "missing 32"
     --expect "macros.c:"
@@ -55,6 +71,31 @@ add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4,
 add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.safety safety.c practical 6 "returnguard safety")
 add_returnguard_test(returnguard.safety_cpp safety.cpp practical 6 "returnguard safety")
+add_returnguard_test(
+    returnguard.complex_array_index_and_oob complex_array_index_and_oob.c practical 1
+    "nullable_bytes")
+add_returnguard_test(
+    returnguard.complex_double_free_and_uaf complex_double_free_and_uaf.c practical 2
+    "potential double free"
+    --expect "use of memory after it was freed")
+add_returnguard_test(
+    returnguard.complex_function_pointer_and_callbacks
+    complex_function_pointer_and_callbacks.c practical 1 "nullable_cb")
+add_returnguard_test(
+    returnguard.complex_memcpy_aliasing complex_memcpy_aliasing.c practical 1
+    "nullable_intptr")
+add_returnguard_test(
+    returnguard.complex_nested_member_return complex_nested_member_return.c practical 1
+    "nullable_top")
+add_returnguard_test(
+    returnguard.complex_pointer_copy_and_return complex_pointer_copy_and_return.c practical 1
+    "copy_and_return")
+add_returnguard_clean_test(
+    returnguard.complex_pointer_to_pointer_aliasing complex_pointer_to_pointer_aliasing.c
+    practical)
+add_returnguard_test(
+    returnguard.complex_shift_overflow complex_shift_overflow.c practical 1
+    "signed left shift")
 add_returnguard_test(
     returnguard.null_state null_state.c practical 10
     "is dereferenced without a prior null check"

@@ -63,6 +63,18 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
                         if (shift_amount >= width) {
                             emit_shift_overflow_warning(binary, shift_amount, width);
                         }
+                        if (binary->getOpcode() == clang::BO_Shl &&
+                            lhs->getType()->isSignedIntegerType() && shift_amount < width) {
+                            auto lhs_val = evaluate_integer(lhs, context_);
+                            if (lhs_val.has_value() && !lhs_val->isNegative()) {
+                                const llvm::APInt shifted =
+                                    lhs_val->extOrTrunc(static_cast<unsigned>(width))
+                                        .shl(static_cast<unsigned>(shift_amount));
+                                if (shifted.isNegative()) {
+                                    emit_signed_shift_overflow_warning(binary);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -179,8 +191,8 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
                 continue;
 
             bool reassigned = false;
-            bool used_after_free = false;
-            const clang::Stmt* use_stmt = nullptr;
+            bool emitted_uaf = false;
+            bool emitted_double_free = false;
 
             for (unsigned i = element_index; i < block->size(); ++i) {
                 const clang::CFGElement& element = (*block)[i];
@@ -251,20 +263,19 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
                             break;
                     }
 
-                    if (expression_references_variable(stmt, var)) {
-                        used_after_free = true;
-                        use_stmt = stmt;
-                        break;
+                    if (!emitted_double_free && is_deallocation_of_variable(stmt, var)) {
+                        emitted_double_free = true;
+                        emit_double_free_warning(stmt, free_stmt, var);
+                    }
+
+                    if (!emitted_uaf && expression_references_variable(stmt, var)) {
+                        emitted_uaf = true;
+                        emit_uaf_warning(stmt, free_stmt, var);
                     }
                 }
             }
 
             if (reassigned) {
-                continue;
-            }
-
-            if (used_after_free) {
-                emit_uaf_warning(use_stmt, free_stmt, var);
                 continue;
             }
 
@@ -345,6 +356,32 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
 
         diagnostics.Report(bin->getOperatorLoc(), diagnostic_id)
             << std::to_string(shift_amount) << std::to_string(width);
+    }
+
+    void emit_signed_shift_overflow_warning(const clang::BinaryOperator* bin) {
+        clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
+        const clang::DiagnosticsEngine::Level level = returnguard::options().fail_on_diagnostics
+                                                          ? clang::DiagnosticsEngine::Error
+                                                          : clang::DiagnosticsEngine::Warning;
+        const unsigned diagnostic_id = diagnostics.getCustomDiagID(
+            level, "returnguard safety: signed left shift result overflows operand type");
+
+        diagnostics.Report(bin->getOperatorLoc(), diagnostic_id);
+    }
+
+    bool is_deallocation_of_variable(const clang::Stmt* stmt, const clang::VarDecl* var) const {
+        if (const auto* call = llvm::dyn_cast_or_null<clang::CallExpr>(stmt)) {
+            const clang::FunctionDecl* callee = call->getDirectCallee();
+            if (callee != nullptr && (callee->getName() == "free" ||
+                                      callee->getName() == "realloc") &&
+                call->getNumArgs() > 0) {
+                return referenced_variable(call->getArg(0)) == var;
+            }
+        }
+        if (const auto* delete_expr = llvm::dyn_cast_or_null<clang::CXXDeleteExpr>(stmt)) {
+            return referenced_variable(delete_expr->getArgument()) == var;
+        }
+        return false;
     }
 
     void emit_oob_warning_at(const clang::Expr* expr, const llvm::APSInt& index,
