@@ -12,7 +12,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tool", required=True)
     parser.add_argument("--source", required=True)
-    parser.add_argument("--include", required=True)
+    parser.add_argument("--include", action="append", required=True)
     parser.add_argument("--mode", required=True)
     parser.add_argument("--warning-count", type=int, required=True)
     parser.add_argument("--expected-exit-code", type=int, default=0)
@@ -42,9 +42,9 @@ def main() -> int:
             args.source,
             "--",
             "-std=c++20" if pathlib.Path(args.source).suffix == ".cpp" else "-std=c17",
-            f"-I{args.include}",
         ]
     )
+    command.extend(f"-I{include}" for include in args.include)
 
     result = subprocess.run(
         command,
