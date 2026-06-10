@@ -9,6 +9,7 @@ function(add_returnguard_test name source mode warning_count expected_text)
             --tool "$<TARGET_FILE:returnguard>"
             --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/${source}"
             --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            --include "${CMAKE_SOURCE_DIR}/include"
             --mode "${mode}"
             --warning-count "${warning_count}"
             --expect "${expected_text}"
