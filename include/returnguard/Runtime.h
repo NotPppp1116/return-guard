@@ -78,6 +78,34 @@ inline T* check_null(T* result, uint32_t site_id) noexcept {
 #define __RG_CHECK_NULL(expression, site_id)                                                 \
     (::returnguard_runtime_detail::check_null((expression), (uint32_t)(site_id)))
 
+#elif defined(__GNUC__) || defined(__clang__)
+
+/*
+ * ReturnGuard itself is Clang-based, so generated C may use the reserved GNU
+ * spellings supported by both Clang and GCC. __extension__ suppresses pedantic
+ * diagnostics while the statement expression and __auto_type preserve the
+ * exact return type and evaluate the wrapped call exactly once.
+ */
+#define __RG_CHECK_NEGATIVE(expression, site_id)                                             \
+    __extension__({                                                                          \
+        __auto_type __rg_result = (expression);                                               \
+        if (__rg_result < 0) {                                                               \
+            const int __rg_saved_errno = errno;                                              \
+            __rg_fatal((uint32_t)(site_id), __rg_saved_errno);                               \
+        }                                                                                    \
+        __rg_result;                                                                         \
+    })
+
+#define __RG_CHECK_NULL(expression, site_id)                                                 \
+    __extension__({                                                                          \
+        __auto_type __rg_result = (expression);                                               \
+        if (__rg_result == NULL) {                                                           \
+            const int __rg_saved_errno = errno;                                              \
+            __rg_fatal((uint32_t)(site_id), __rg_saved_errno);                               \
+        }                                                                                    \
+        __rg_result;                                                                         \
+    })
+
 #else
 
 static inline signed char __rg_check_negative_schar(signed char result, uint32_t site_id) {
