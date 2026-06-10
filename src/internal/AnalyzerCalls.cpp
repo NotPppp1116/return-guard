@@ -117,12 +117,21 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
 
     if (const clang::VarDecl* variable = variable_initialized_by_call(call)) {
         CheckResult result = analyze_variable(call, variable, domain);
+        if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
+            return *flow;
+        }
+        if ((result.kind == HandlingKind::ExhaustivelyChecked ||
+             result.kind == HandlingKind::Forwarded) &&
+            value_flow(enclosing_function(call)) != nullptr) {
+            return {
+                .kind = HandlingKind::Consumed,
+                .missing = {},
+                .detail = "stored result has no reachable CFG-proven handling",
+            };
+        }
         if (result.kind == HandlingKind::ExhaustivelyChecked ||
             result.kind == HandlingKind::Forwarded) {
             return result;
-        }
-        if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
-            return *flow;
         }
         return result;
     }
@@ -136,12 +145,21 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
         }
 
         CheckResult result = analyze_variable(call, variable, domain);
+        if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
+            return *flow;
+        }
+        if ((result.kind == HandlingKind::ExhaustivelyChecked ||
+             result.kind == HandlingKind::Forwarded) &&
+            value_flow(enclosing_function(call)) != nullptr) {
+            return {
+                .kind = HandlingKind::Consumed,
+                .missing = {},
+                .detail = "stored result has no reachable CFG-proven handling",
+            };
+        }
         if (result.kind == HandlingKind::ExhaustivelyChecked ||
             result.kind == HandlingKind::Forwarded) {
             return result;
-        }
-        if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
-            return *flow;
         }
         return result;
     }
@@ -252,10 +270,8 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
     emit(call, message.str(), note);
 }
 
-bool Analyzer::function_checks_parameter(
-    const clang::FunctionDecl* function,
-    unsigned param_index,
-    const Domain& domain) const {
+bool Analyzer::function_checks_parameter(const clang::FunctionDecl* function, unsigned param_index,
+                                         const Domain& domain) const {
     if (function == nullptr) {
         return false;
     }
@@ -269,9 +285,11 @@ bool Analyzer::function_checks_parameter(
     active_parameter_checks_.push_back(target);
 
     const clang::FunctionDecl* definition = nullptr;
-    if (canonical->hasBody(definition) && definition != nullptr && param_index < definition->getNumParams()) {
+    if (canonical->hasBody(definition) && definition != nullptr &&
+        param_index < definition->getNumParams()) {
         const clang::ParmVarDecl* param = definition->getParamDecl(param_index);
-        HandlerFinder finder(const_cast<Analyzer&>(*this), param, definition->getBody()->getBeginLoc(), domain);
+        HandlerFinder finder(const_cast<Analyzer&>(*this), param,
+                             definition->getBody()->getBeginLoc(), domain);
         finder.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
 
         active_parameter_checks_.erase(

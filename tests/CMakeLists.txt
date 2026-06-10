@@ -43,6 +43,7 @@ add_returnguard_test(returnguard.integers integers.c strict 1 "missing 32")
 add_returnguard_test(returnguard.inference inference.c strict 2 "no final else")
 add_returnguard_test(returnguard.inference_complex inference_complex.c strict 6 "missing")
 add_returnguard_test(returnguard.inference_cfg inference_cfg.c strict 1 "no final else")
+add_returnguard_test(returnguard.return_flow_cfg return_flow_cfg.c strict 2 "CFG-proven")
 add_returnguard_test(returnguard.if_chains if_chains.c practical 1 "missing 32")
 add_returnguard_test(returnguard.direct_if direct_if.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.loop_conditions loop_conditions.c practical 2 "missing 32")
@@ -72,6 +73,8 @@ add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4,
 add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.safety safety.c practical 6 "returnguard safety")
 add_returnguard_test(returnguard.safety_cpp safety.cpp practical 6 "returnguard safety")
+add_returnguard_test(returnguard.safety_lifetime safety_lifetime.c practical 5 "returnguard safety")
+add_returnguard_test(returnguard.safety_lifetime_cpp safety_lifetime.cpp practical 2 "returnguard safety")
 add_returnguard_test(
     returnguard.complex_array_index_and_oob complex_array_index_and_oob.c practical 1
     "nullable_bytes")

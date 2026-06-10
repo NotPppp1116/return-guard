@@ -78,8 +78,8 @@ class ResultAccumulator final {
                 covered_[index] = true;
             }
         }
-        exhaustive_ = std::all_of(
-            covered_.begin(), covered_.end(), [](bool value) { return value; });
+        exhaustive_ =
+            std::all_of(covered_.begin(), covered_.end(), [](bool value) { return value; });
     }
 
     void mark_forwarded() { forwarded_ = true; }
@@ -121,18 +121,11 @@ class ResultAccumulator final {
     bool forwarded_ = false;
 };
 
-class FlowHandlingFinder final
-    : public clang::RecursiveASTVisitor<FlowHandlingFinder> {
+class FlowHandlingFinder final : public clang::RecursiveASTVisitor<FlowHandlingFinder> {
   public:
-    FlowHandlingFinder(
-        Analyzer& analyzer,
-        const clang::CallExpr& call,
-        const ExpressionSet& aliases,
-        const Domain& domain)
-        : analyzer_(analyzer),
-          call_(call),
-          aliases_(aliases),
-          domain_(domain),
+    FlowHandlingFinder(Analyzer& analyzer, const clang::CallExpr& call,
+                       const ExpressionSet& aliases, const Domain& domain)
+        : analyzer_(analyzer), call_(call), aliases_(aliases), domain_(domain),
           accumulator_(domain) {}
 
     bool VisitSwitchStmt(clang::SwitchStmt* statement) {
@@ -144,8 +137,7 @@ class FlowHandlingFinder final
     }
 
     bool VisitIfStmt(clang::IfStmt* statement) {
-        if (occurs_after(statement->getIfLoc()) &&
-            contains_alias(statement->getCond(), aliases_)) {
+        if (occurs_after(statement->getIfLoc()) && contains_alias(statement->getCond(), aliases_)) {
             accumulator_.add(analyzer_.analyze_if_chain(statement, aliases_, domain_));
         }
         return true;
@@ -160,8 +152,7 @@ class FlowHandlingFinder final
     }
 
     bool VisitDoStmt(clang::DoStmt* statement) {
-        if (occurs_after(statement->getDoLoc()) &&
-            contains_alias(statement->getCond(), aliases_)) {
+        if (occurs_after(statement->getDoLoc()) && contains_alias(statement->getCond(), aliases_)) {
             accumulator_.add(analyzer_.analyze_condition(statement->getCond(), aliases_, domain_));
         }
         return true;
@@ -194,9 +185,29 @@ class FlowHandlingFinder final
         return clang::RecursiveASTVisitor<FlowHandlingFinder>::TraverseReturnStmt(statement);
     }
 
-    [[nodiscard]] std::optional<CheckResult> result() const {
-        return accumulator_.result();
+    bool VisitCallExpr(clang::CallExpr* call) {
+        if (!occurs_after(call->getBeginLoc())) {
+            return true;
+        }
+
+        const clang::FunctionDecl* callee = call->getDirectCallee();
+        if (callee == nullptr) {
+            return true;
+        }
+
+        for (unsigned index = 0; index < call->getNumArgs(); ++index) {
+            if (is_alias_expression(call->getArg(index), aliases_) &&
+                analyzer_.function_checks_parameter(callee, index, domain_)) {
+                CheckResult result;
+                result.kind = HandlingKind::ExhaustivelyChecked;
+                accumulator_.add(std::move(result));
+                break;
+            }
+        }
+        return true;
     }
+
+    [[nodiscard]] std::optional<CheckResult> result() const { return accumulator_.result(); }
 
   private:
     [[nodiscard]] bool occurs_after(clang::SourceLocation location) const {
@@ -240,9 +251,8 @@ CFGValueFlow* Analyzer::value_flow(const clang::FunctionDecl* function) {
     return result;
 }
 
-std::optional<CheckResult> Analyzer::analyze_flow_aliases(
-    const clang::CallExpr* call,
-    const Domain& domain) {
+std::optional<CheckResult> Analyzer::analyze_flow_aliases(const clang::CallExpr* call,
+                                                          const Domain& domain) {
     const clang::FunctionDecl* function = enclosing_function(call);
     CFGValueFlow* flow = value_flow(function);
     if (flow == nullptr) {
