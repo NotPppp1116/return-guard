@@ -188,6 +188,7 @@ install(TARGETS returnguard returnguard_runtime
 )
 install(
     FILES
+        include/returnguard/Contracts.h
         include/returnguard/Nullability.h
         include/returnguard/Runtime.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/returnguard
@@ -204,5 +205,16 @@ install(
 
 if(RETURNGUARD_BUILD_TESTS)
     enable_testing()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_subdirectory(tests)
+    add_test(
+        NAME returnguard.instrumentation
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_instrumentation.py"
+            --tool "$<TARGET_FILE:returnguard>"
+            --source "${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/instrumentation.c"
+            --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            --compiler "${CMAKE_C_COMPILER}"
+    )
 endif()
