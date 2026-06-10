@@ -51,6 +51,16 @@ Limit a trial run:
 returnguard-project -p build --max-files 100 --dry-run
 ```
 
+When scanning source roots without a compilation database, built-in generated
+and VCS directories are skipped. Add project-specific generated or vendored
+directory basenames with `--scan-exclude-dir`:
+
+```sh
+returnguard-project --source-root . \
+    --scan-exclude-dir generated \
+    --scan-exclude-dir vendor
+```
+
 ## CI sharding
 
 Translation units are assigned by hashing their path relative to the
