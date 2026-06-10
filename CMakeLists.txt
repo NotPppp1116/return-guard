@@ -175,8 +175,8 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS returnguard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(
-    DIRECTORY include/returnguard
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES include/returnguard/Nullability.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/returnguard
 )
 install(
     PROGRAMS scripts/returnguard_project.py
