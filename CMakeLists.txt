@@ -126,6 +126,11 @@ target_compile_options(returnguard PRIVATE
     -Wno-unused-parameter
 )
 
+target_compile_options(returnguard PRIVATE
+    -include
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/internal/APIntStringCompat.hpp"
+)
+
 if(RETURNGUARD_WARNINGS_AS_ERRORS)
     target_compile_options(returnguard PRIVATE -Werror)
 endif()
