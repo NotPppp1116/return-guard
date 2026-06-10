@@ -29,10 +29,7 @@ Domain Analyzer::enum_domain(const clang::EnumDecl* declaration) const {
     domain.type_name = declaration->getQualifiedNameAsString();
 
     for (const clang::EnumConstantDecl* enumerator : declaration->enumerators()) {
-        add_domain_value(
-            domain,
-            enumerator->getInitVal(),
-            enumerator->getQualifiedNameAsString());
+        add_domain_value(domain, enumerator->getInitVal(), enumerator->getQualifiedNameAsString());
     }
     return domain;
 }
@@ -44,14 +41,8 @@ Domain Analyzer::type_domain(clang::QualType type) const {
     const clang::QualType canonical = type.getCanonicalType();
     if (canonical->isBooleanType()) {
         domain.finite = true;
-        add_domain_value(
-            domain,
-            llvm::APSInt(llvm::APInt(1U, 0U), true),
-            "false");
-        add_domain_value(
-            domain,
-            llvm::APSInt(llvm::APInt(1U, 1U), true),
-            "true");
+        add_domain_value(domain, llvm::APSInt(llvm::APInt(1U, 0U), true), "false");
+        add_domain_value(domain, llvm::APSInt(llvm::APInt(1U, 1U), true), "true");
         return domain;
     }
 
@@ -102,11 +93,9 @@ Domain Analyzer::annotation_domain(const clang::FunctionDecl* function) const {
                 if (negative) {
                     raw = -raw;
                 }
-                add_domain_value(
-                    domain,
-                    llvm::APSInt(raw, false),
-                    negative ? "-" + std::to_string(magnitude)
-                             : std::to_string(magnitude));
+                add_domain_value(domain, llvm::APSInt(raw, false),
+                                 negative ? "-" + std::to_string(magnitude)
+                                          : std::to_string(magnitude));
             }
 
             if (!found_value) {
@@ -122,20 +111,18 @@ Domain Analyzer::annotation_domain(const clang::FunctionDecl* function) const {
     return domain;
 }
 
-std::optional<Domain> Analyzer::expression_domain(
-    const clang::Expr* expression,
-    std::unordered_set<const clang::FunctionDecl*>& active_functions,
-    std::unordered_set<const clang::VarDecl*>& active_variables) {
+std::optional<Domain>
+Analyzer::expression_domain(const clang::Expr* expression,
+                            std::unordered_set<const clang::FunctionDecl*>& active_functions,
+                            std::unordered_set<const clang::VarDecl*>& active_variables) {
     ValueSetInference inference(*this);
     return inference.infer_expression(expression, active_functions, active_variables);
 }
 
-Domain Analyzer::function_domain(
-    const clang::FunctionDecl* function,
-    std::unordered_set<const clang::FunctionDecl*>& active) {
+Domain Analyzer::function_domain(const clang::FunctionDecl* function,
+                                 std::unordered_set<const clang::FunctionDecl*>& active) {
     const clang::FunctionDecl* canonical = function->getCanonicalDecl();
-    if (const auto found = domain_cache_.find(canonical);
-        found != domain_cache_.end()) {
+    if (const auto found = domain_cache_.find(canonical); found != domain_cache_.end()) {
         return found->second;
     }
 
@@ -202,7 +189,6 @@ Domain Analyzer::function_domain(
     active.erase(canonical);
 
     if (!inferred.finite) {
-        active.erase(canonical);
         domain_cache_[canonical] = by_type;
         return by_type;
     }

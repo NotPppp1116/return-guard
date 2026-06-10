@@ -114,8 +114,11 @@ struct State {
 bool is_source(const clang::Expr* expression, const NullSource& source) {
     if (expression == nullptr) return false;
     expression = strip_expr(expression);
-    if (source.expr != nullptr && expression == source.expr) {
-        return true;
+    if (source.expr != nullptr) {
+        const clang::Expr* stored = strip_expr(source.expr);
+        if (stored != nullptr && expression == stored) {
+            return true;
+        }
     }
     if (source.decl != nullptr) {
         if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
@@ -296,4 +299,3 @@ BranchConstraint condition_constraint(
         NullState::Null,
         NullState::NonNull);
 }
-
