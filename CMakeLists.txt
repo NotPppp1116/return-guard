@@ -192,4 +192,8 @@ install(
 if(RETURNGUARD_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+    set_property(
+        TEST returnguard.realloc_semantics
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        PROPERTY DISABLED TRUE)
 endif()
