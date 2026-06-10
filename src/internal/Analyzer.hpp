@@ -74,6 +74,7 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
                                          std::unordered_set<const clang::FunctionDecl*>& active);
     [[nodiscard]] Domain function_domain(const clang::FunctionDecl* function);
     [[nodiscard]] Domain call_domain(const clang::CallExpr* call);
+    [[nodiscard]] bool call_returns_nullable_pointer(const clang::CallExpr* call) const;
 
   private:
     friend class HandlerFinder;
@@ -113,9 +114,12 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] std::optional<CheckResult>
     analyze_flow_aliases(const clang::CallExpr* call, const Domain& domain);
 
-    [[nodiscard]] bool call_returns_nullable_pointer(const clang::CallExpr* call) const;
+    [[nodiscard]] bool is_nullable_function(const clang::FunctionDecl* function) const;
+    [[nodiscard]] bool is_nullable_function_impl(
+        const clang::FunctionDecl* function,
+        std::unordered_set<const clang::FunctionDecl*>& active) const;
     [[nodiscard]] NullStateAnalysis*
-    null_state_analysis(const clang::FunctionDecl* function);
+    null_state_analysis(const clang::FunctionDecl* function) const;
     void analyze_nullable_call(const clang::CallExpr* call);
 
     [[nodiscard]] std::string function_name(const clang::CallExpr* call) const;
@@ -135,9 +139,11 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     std::unordered_map<const clang::FunctionDecl*, Domain> domain_cache_;
     std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<CFGValueFlow>> value_flow_cache_;
     std::unordered_set<const clang::FunctionDecl*> value_flow_failures_;
-    std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<NullStateAnalysis>>
+    mutable std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<NullStateAnalysis>>
         null_state_cache_;
-    std::unordered_set<const clang::FunctionDecl*> null_state_failures_;
+    mutable std::unordered_set<const clang::FunctionDecl*> null_state_failures_;
+    mutable std::unordered_map<const clang::FunctionDecl*, bool> nullable_cache_;
+    mutable std::unordered_set<const clang::FunctionDecl*> active_nullable_checks_;
 };
 
 } // namespace returnguard::internal

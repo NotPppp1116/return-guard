@@ -143,3 +143,29 @@ int unchecked_nullable_callback(void) {
     callback function = nullable_callback();
     return function();
 }
+
+struct item* check_and_return_safe(void) {
+    static struct item fallback = {42};
+    struct item* item = nullable_item();
+    if (item == NULL) {
+        return &fallback;
+    }
+    return item;
+}
+
+int unchecked_safe_inferred(void) {
+    struct item* item = check_and_return_safe();
+    return item->value;
+}
+
+struct item* check_and_return_unsafe(void) {
+    struct item* item = nullable_item();
+    return item;
+}
+
+int unchecked_unsafe_inferred(void) {
+    struct item* item = check_and_return_unsafe();
+    return item->value;
+}
+
+

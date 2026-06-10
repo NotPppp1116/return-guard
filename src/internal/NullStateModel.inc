@@ -111,6 +111,22 @@ struct State {
     }
 };
 
+bool is_source(const clang::Expr* expression, const NullSource& source) {
+    if (expression == nullptr) return false;
+    expression = strip_expr(expression);
+    if (source.expr != nullptr && expression == source.expr) {
+        return true;
+    }
+    if (source.decl != nullptr) {
+        if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
+            if (ref->getDecl() == source.decl) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool is_null_pointer_constant(
     const clang::Expr* expression,
     const clang::ASTContext& context) {
@@ -124,12 +140,12 @@ bool is_null_pointer_constant(
 PointerFact fact_for_expression(
     const clang::Expr* expression,
     const State& state,
-    const clang::CallExpr& target) {
+    const NullSource& target) {
     expression = strip_expr(expression);
     if (expression == nullptr) {
         return {};
     }
-    if (expression == &target) {
+    if (is_source(expression, target)) {
         return {
             .origin = Origin::Yes,
             .null_state = NullState::MaybeNull,
@@ -223,7 +239,7 @@ BranchConstraint invert_constraint(BranchConstraint constraint) {
 BranchConstraint condition_constraint(
     const clang::Expr* expression,
     State& state,
-    const clang::CallExpr& target,
+    const NullSource& target,
     const clang::ASTContext& context) {
     expression = strip_expr(expression);
     if (expression == nullptr) {
@@ -280,3 +296,4 @@ BranchConstraint condition_constraint(
         NullState::Null,
         NullState::NonNull);
 }
+

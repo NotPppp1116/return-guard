@@ -2,7 +2,7 @@ class Transfer final {
   public:
     Transfer(
         State& state,
-        const clang::CallExpr& target,
+        const NullSource& target,
         std::unordered_set<const clang::Expr*>* unsafe)
         : state_(state), target_(target), unsafe_(unsafe) {}
 
@@ -44,9 +44,11 @@ class Transfer final {
             return {};
         }
 
-        if (expression == &target_) {
-            for (const clang::Expr* argument : target_.arguments()) {
-                evaluate(argument);
+        if (is_source(expression, target_)) {
+            if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expression)) {
+                for (const clang::Expr* argument : call->arguments()) {
+                    evaluate(argument);
+                }
             }
             return {
                 .origin = Origin::Yes,
@@ -188,14 +190,14 @@ class Transfer final {
     }
 
     State& state_;
-    const clang::CallExpr& target_;
+    const NullSource& target_;
     std::unordered_set<const clang::Expr*>* unsafe_;
 };
 
 void transfer_block(
     const clang::CFGBlock& block,
     State& state,
-    const clang::CallExpr& target,
+    const NullSource& target,
     std::unordered_set<const clang::Expr*>* unsafe) {
     Transfer transfer(state, target, unsafe);
     for (const clang::CFGElement& element : block) {
@@ -213,7 +215,7 @@ State state_for_successor(
     const clang::CFGBlock& block,
     State state,
     unsigned successor_index,
-    const clang::CallExpr& target,
+    const NullSource& target,
     const clang::ASTContext& context) {
     if (block.succ_size() != 2U || successor_index > 1U) {
         return state;
@@ -231,3 +233,4 @@ State state_for_successor(
             : constraint.false_state);
     return state;
 }
+

@@ -14,6 +14,11 @@ class FunctionDecl;
 
 namespace returnguard::internal {
 
+struct NullSource {
+    const clang::Expr* expr = nullptr;
+    const clang::ValueDecl* decl = nullptr;
+};
+
 class NullStateAnalysis final {
   public:
     static std::unique_ptr<NullStateAnalysis> build(
@@ -23,6 +28,11 @@ class NullStateAnalysis final {
     [[nodiscard]] std::vector<const clang::Expr*>
     unsafe_dereferences_for(const clang::CallExpr& call) const;
 
+    [[nodiscard]] bool is_source_nullable_at(
+        const NullSource& source,
+        const clang::Stmt* stmt,
+        const clang::ValueDecl* var) const;
+
   private:
     NullStateAnalysis(
         std::unique_ptr<clang::CFG> cfg,
@@ -31,5 +41,6 @@ class NullStateAnalysis final {
     std::unique_ptr<clang::CFG> cfg_;
     clang::ASTContext& context_;
 };
+
 
 } // namespace returnguard::internal

@@ -6,18 +6,19 @@ namespace returnguard::internal {
 
 ReturnCollector::ReturnCollector(
     const clang::ASTContext&,
-    std::vector<const clang::Expr*>& expressions)
-    : expressions_(expressions) {}
+    std::vector<const clang::ReturnStmt*>& statements)
+    : statements_(statements) {}
 
 bool ReturnCollector::shouldVisitLambdaBody() const {
     return false;
 }
 
 bool ReturnCollector::VisitReturnStmt(clang::ReturnStmt* statement) {
-    if (statement->getRetValue() != nullptr) {
-        expressions_.push_back(statement->getRetValue());
+    if (statement != nullptr) {
+        statements_.push_back(statement);
     }
     return true;
 }
+
 
 } // namespace returnguard::internal

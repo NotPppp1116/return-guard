@@ -158,9 +158,16 @@ Domain Analyzer::function_domain(
         return by_type;
     }
 
-    std::vector<const clang::Expr*> returns;
-    ReturnCollector collector(context_, returns);
+    std::vector<const clang::ReturnStmt*> return_stmts;
+    ReturnCollector collector(context_, return_stmts);
     collector.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
+
+    std::vector<const clang::Expr*> returns;
+    for (const clang::ReturnStmt* stmt : return_stmts) {
+        if (stmt != nullptr && stmt->getRetValue() != nullptr) {
+            returns.push_back(stmt->getRetValue());
+        }
+    }
 
     if (returns.empty()) {
         active.erase(canonical);
