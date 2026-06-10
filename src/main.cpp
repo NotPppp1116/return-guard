@@ -121,6 +121,7 @@ int main(int argc, const char** argv) {
         parser->getSourcePathList());
     tool.appendArgumentsAdjuster(parser->getArgumentsAdjuster());
     tool.appendArgumentsAdjuster(returnguard::resource_directory_adjuster());
+    tool.appendArgumentsAdjuster(returnguard::compiler_diagnostic_adjuster());
 
     returnguard::ActionFactory factory;
     return tool.run(&factory);
