@@ -19,23 +19,12 @@ class ValueSetInference {
 
     [[nodiscard]] std::optional<Domain>
     infer_expression(const clang::Expr* expression,
-                      std::unordered_set<const clang::FunctionDecl*>& active_functions,
-                      std::unordered_set<const clang::VarDecl*>& active_variables);
+                     std::unordered_set<const clang::FunctionDecl*>& active_functions,
+                     std::unordered_set<const clang::VarDecl*>& active_variables);
 
   private:
     [[nodiscard]] std::optional<Domain>
-    infer_binary(const clang::BinaryOperator* binary,
-                 std::unordered_set<const clang::FunctionDecl*>& active_functions,
-                 std::unordered_set<const clang::VarDecl*>& active_variables);
-
-    [[nodiscard]] std::optional<Domain>
-    infer_unary(const clang::UnaryOperator* unary,
-                std::unordered_set<const clang::FunctionDecl*>& active_functions,
-                std::unordered_set<const clang::VarDecl*>& active_variables);
-
-    [[nodiscard]] std::optional<Domain>
-    infer_variable(const clang::VarDecl* variable,
-                   const clang::Expr* reference_site,
+    infer_variable(const clang::VarDecl* variable, const clang::Expr* reference_site,
                    std::unordered_set<const clang::FunctionDecl*>& active_functions,
                    std::unordered_set<const clang::VarDecl*>& active_variables);
 

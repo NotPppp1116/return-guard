@@ -91,7 +91,7 @@ void test_ternary_exhaustive(int a, int b, int c) {
     if (s == 1 || s == 2 || s == 13 || s == 14) {
         return;
     }
-} // Should NOT warn
+} // Should warn: dependent variable arithmetic is not inferred
 
 void test_ternary_missing(int a, int b, int c) {
     int s = nested_ternary_inference(a, b, c);
@@ -162,7 +162,7 @@ int arithmetic_inference(void) {
 void test_arithmetic_inference(void) {
     int s = arithmetic_inference();
     if (s == 3) return;
-} // Should NOT warn
+} // Should warn: non-constant arithmetic domains are not inferred
 
 int get_status_val(void) {
     return 1;
@@ -177,4 +177,3 @@ void test_inferred_condition_missing(void) {
     int x = get_status_val();
     if (x == 2) return;
 } // Should warn: missing 1
-

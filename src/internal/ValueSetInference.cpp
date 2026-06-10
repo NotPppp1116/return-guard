@@ -8,10 +8,14 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
+#include <clang/Analysis/CFG.h>
+#include <clang/Basic/SourceManager.h>
 #include <llvm/ADT/APSInt.h>
 #include <llvm/Support/Casting.h>
 
 #include <algorithm>
+#include <deque>
+#include <memory>
 #include <unordered_set>
 #include <vector>
 
@@ -43,12 +47,9 @@ std::optional<Domain> ValueSetInference::infer_expression(
         }
     }
 
-    if (const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(expression)) {
-        return infer_binary(binary, active_functions, active_variables);
-    }
-
-    if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(expression)) {
-        return infer_unary(unary, active_functions, active_variables);
+    if (const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(expression);
+        binary != nullptr && binary->getOpcode() == clang::BO_Comma) {
+        return infer_expression(binary->getRHS(), active_functions, active_variables);
     }
 
     if (const auto* conditional = llvm::dyn_cast<clang::ConditionalOperator>(expression)) {
@@ -83,149 +84,135 @@ std::optional<Domain> ValueSetInference::infer_expression(
     return std::nullopt;
 }
 
-std::optional<Domain>
-ValueSetInference::infer_binary(const clang::BinaryOperator* binary,
-                                std::unordered_set<const clang::FunctionDecl*>& active_functions,
-                                std::unordered_set<const clang::VarDecl*>& active_variables) {
-    if (binary->getOpcode() == clang::BO_Comma) {
-        return infer_expression(binary->getRHS(), active_functions, active_variables);
-    }
-
-    if (!binary->isAdditiveOp() && !binary->isMultiplicativeOp() && !binary->isBitwiseOp() &&
-        !binary->isShiftOp()) {
-        return std::nullopt;
-    }
-
-    auto lhs = infer_expression(binary->getLHS(), active_functions, active_variables);
-    auto rhs = infer_expression(binary->getRHS(), active_functions, active_variables);
-
-    if (!lhs || !lhs->finite || !rhs || !rhs->finite) {
-        return std::nullopt;
-    }
-
-    Domain result;
-    result.finite = true;
-    result.inferred_from_body = true;
-    result.type_name = binary->getType().getAsString();
-
-    for (const auto& l : lhs->values) {
-        for (const auto& r : rhs->values) {
-            llvm::APSInt val = l.value;
-            switch (binary->getOpcode()) {
-            case clang::BO_Add:
-                val += r.value;
-                break;
-            case clang::BO_Sub:
-                val -= r.value;
-                break;
-            case clang::BO_Mul:
-                val *= r.value;
-                break;
-            case clang::BO_Div:
-                if (r.value == 0)
-                    return std::nullopt;
-                val /= r.value;
-                break;
-            case clang::BO_Rem:
-                if (r.value == 0)
-                    return std::nullopt;
-                val %= r.value;
-                break;
-            case clang::BO_And:
-                val &= r.value;
-                break;
-            case clang::BO_Or:
-                val |= r.value;
-                break;
-            case clang::BO_Xor:
-                val ^= r.value;
-                break;
-            case clang::BO_Shl:
-            case clang::BO_Shr: {
-                int64_t shift = r.value.getExtValue();
-                if (shift < 0 || static_cast<uint64_t>(shift) >= val.getBitWidth()) {
-                    return std::nullopt;
-                }
-                if (binary->getOpcode() == clang::BO_Shl) {
-                    val <<= static_cast<unsigned>(shift);
-                } else {
-                    val >>= static_cast<unsigned>(shift);
-                }
-                break;
-            }
-            default:
-                return std::nullopt;
-            }
-            add_domain_value(result, val, "");
-        }
-    }
-
-    if (result.values.size() > 128)
-        return std::nullopt; // Safety limit
-    return result;
-}
-
-std::optional<Domain>
-ValueSetInference::infer_unary(const clang::UnaryOperator* unary,
-                               std::unordered_set<const clang::FunctionDecl*>& active_functions,
-                               std::unordered_set<const clang::VarDecl*>& active_variables) {
-    auto sub = infer_expression(unary->getSubExpr(), active_functions, active_variables);
-    if (!sub || !sub->finite) {
-        return std::nullopt;
-    }
-
-    Domain result;
-    result.finite = true;
-    result.inferred_from_body = true;
-    result.type_name = unary->getType().getAsString();
-
-    for (const auto& s : sub->values) {
-        llvm::APSInt val = s.value;
-        switch (unary->getOpcode()) {
-        case clang::UO_Minus:
-            val = -val;
-            break;
-        case clang::UO_Plus:
-            break;
-        case clang::UO_Not:
-            val = ~val;
-            break;
-        case clang::UO_LNot:
-            val = llvm::APSInt(llvm::APInt(1U, val == 0 ? 1U : 0U), false);
-            break;
-        default:
-            return std::nullopt;
-        }
-        add_domain_value(result, val, "");
-    }
-
-    return result;
-}
-
 namespace {
+bool contains_statement(const clang::Stmt* root, const clang::Stmt* needle) {
+    if (root == nullptr || needle == nullptr) {
+        return false;
+    }
+    if (root == needle) {
+        return true;
+    }
+    for (const clang::Stmt* child : root->children()) {
+        if (contains_statement(child, needle)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 class SimpleAssignmentFinder : public clang::RecursiveASTVisitor<SimpleAssignmentFinder> {
   public:
-    SimpleAssignmentFinder(const clang::VarDecl* target) : target_(target) {}
-    bool VisitBinaryOperator(clang::BinaryOperator* op) {
-        if (op->isAssignmentOp() && referenced_variable(op->getLHS()) == target_) {
-            if (op->getOpcode() == clang::BO_Assign) {
-                assignments_.push_back(op->getRHS());
-            } else {
-                valid_ = false;
-            }
-        }
-        return true;
-    }
+    SimpleAssignmentFinder(const clang::VarDecl* target, const clang::Expr* reference_site,
+                           const clang::ASTContext& context)
+        : target_(target), reference_site_(reference_site), context_(context) {}
+
     bool VisitUnaryOperator(clang::UnaryOperator* op) {
-        if (op->isIncrementDecrementOp() && referenced_variable(op->getSubExpr()) == target_) {
+        if (op->getOpcode() == clang::UO_AddrOf &&
+            referenced_variable(op->getSubExpr()) == target_ && occurs_before_reference(op)) {
             valid_ = false;
+            return false;
+        }
+        if (op->isIncrementDecrementOp() && referenced_variable(op->getSubExpr()) == target_ &&
+            occurs_before_reference(op)) {
+            valid_ = false;
+            return false;
         }
         return true;
     }
+
+    bool VisitBinaryOperator(clang::BinaryOperator* op) {
+        if (!op->isAssignmentOp() || referenced_variable(op->getLHS()) != target_ ||
+            !occurs_before_reference(op)) {
+            return true;
+        }
+
+        if (op->getOpcode() != clang::BO_Assign) {
+            valid_ = false;
+            return false;
+        }
+        assignments_.push_back(op->getRHS());
+        return true;
+    }
+
+    bool add_initializer_if_relevant() {
+        if (!target_->hasInit()) {
+            return true;
+        }
+        if (!occurs_before_reference(target_)) {
+            valid_ = false;
+            return false;
+        }
+        assignments_.push_back(target_->getInit());
+        return true;
+    }
+
     bool valid_ = true;
     std::vector<const clang::Expr*> assignments_;
+
+  private:
+    bool occurs_before_reference(const clang::Stmt* statement) const {
+        return occurs_before_reference(statement == nullptr ? clang::SourceLocation{}
+                                                            : statement->getBeginLoc());
+    }
+
+    bool occurs_before_reference(const clang::Decl* declaration) const {
+        return occurs_before_reference(declaration == nullptr ? clang::SourceLocation{}
+                                                              : declaration->getLocation());
+    }
+
+    bool occurs_before_reference(clang::SourceLocation location) const {
+        const clang::SourceManager& source_manager = context_.getSourceManager();
+        location = source_manager.getFileLoc(location);
+        clang::SourceLocation reference = source_manager.getFileLoc(reference_site_->getExprLoc());
+        if (location.isInvalid() || reference.isInvalid() ||
+            source_manager.getFileID(location) != source_manager.getFileID(reference)) {
+            return false;
+        }
+        return source_manager.isBeforeInTranslationUnit(location, reference);
+    }
+
     const clang::VarDecl* target_;
+    const clang::Expr* reference_site_;
+    const clang::ASTContext& context_;
 };
+
+const clang::CFGBlock* block_containing_reference(const clang::CFG& cfg,
+                                                  const clang::Expr* reference_site) {
+    for (const clang::CFGBlock* block : cfg) {
+        for (const clang::CFGElement& element : *block) {
+            const auto statement = element.getAs<clang::CFGStmt>();
+            if (!statement.has_value()) {
+                continue;
+            }
+            if (contains_statement(statement->getStmt(), reference_site)) {
+                return block;
+            }
+        }
+    }
+    return nullptr;
+}
+
+std::unordered_set<unsigned> blocks_reaching(const clang::CFGBlock& target) {
+    std::unordered_set<unsigned> reachable;
+    std::deque<const clang::CFGBlock*> worklist;
+    worklist.push_back(&target);
+
+    while (!worklist.empty()) {
+        const clang::CFGBlock* block = worklist.front();
+        worklist.pop_front();
+        if (block == nullptr || !reachable.insert(block->getBlockID()).second) {
+            continue;
+        }
+        for (clang::CFGBlock::const_pred_iterator pred = block->pred_begin();
+             pred != block->pred_end(); ++pred) {
+            if (const clang::CFGBlock* predecessor = *pred) {
+                worklist.push_back(predecessor);
+            }
+        }
+    }
+
+    return reachable;
+}
 } // namespace
 
 std::optional<Domain>
@@ -252,11 +239,43 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
         return std::nullopt;
     }
 
-    SimpleAssignmentFinder finder(variable);
-    if (variable->hasInit()) {
-        finder.assignments_.push_back(variable->getInit());
+    clang::CFG::BuildOptions options;
+    std::unique_ptr<clang::CFG> cfg = clang::CFG::buildCFG(
+        function, function->getBody(), const_cast<clang::ASTContext*>(&context_), options);
+    if (!cfg) {
+        active_variables.erase(variable);
+        return std::nullopt;
     }
-    finder.TraverseStmt(const_cast<clang::Stmt*>(function->getBody()));
+
+    const clang::CFGBlock* reference_block = block_containing_reference(*cfg, reference_site);
+    if (reference_block == nullptr) {
+        active_variables.erase(variable);
+        return std::nullopt;
+    }
+
+    const std::unordered_set<unsigned> reaching_blocks = blocks_reaching(*reference_block);
+
+    SimpleAssignmentFinder finder(variable, reference_site, context_);
+    finder.add_initializer_if_relevant();
+
+    for (const clang::CFGBlock* block : *cfg) {
+        if (block == nullptr || !reaching_blocks.contains(block->getBlockID())) {
+            continue;
+        }
+        for (const clang::CFGElement& element : *block) {
+            const auto statement = element.getAs<clang::CFGStmt>();
+            if (!statement.has_value()) {
+                continue;
+            }
+            finder.TraverseStmt(const_cast<clang::Stmt*>(statement->getStmt()));
+            if (!finder.valid_) {
+                break;
+            }
+        }
+        if (!finder.valid_) {
+            break;
+        }
+    }
 
     if (!finder.valid_ || finder.assignments_.empty()) {
         active_variables.erase(variable);
