@@ -51,6 +51,7 @@ add_returnguard_test(returnguard.annotation_redeclaration annotation_redeclarati
 add_returnguard_test(returnguard.switches switches.c strict 1 "open-ended")
 add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value of 'annotated_status'")
 add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4, 32")
+add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
 add_returnguard_test(
     returnguard.fail_on_diagnostics ignored.c ignored-only 1
     "return value of 'annotated_status'"
