@@ -4,8 +4,7 @@ project(returnguard VERSION 0.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(RETURNGUARD_WARNINGS_AS_ERRORS "Treat ReturnGuard warnings as errors" OFF)
 option(RETURNGUARD_BUILD_TESTS "Build and register ReturnGuard tests" ON)
@@ -45,17 +44,6 @@ if(RETURNGUARD_CLANG_EXECUTABLE)
     endif()
 endif()
 
-if(NOT RETURNGUARD_RESOURCE_DIR)
-    foreach(LLVM_LIBRARY_DIR IN LISTS LLVM_LIBRARY_DIRS)
-        if(IS_DIRECTORY "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}/include")
-            file(TO_CMAKE_PATH
-                "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}"
-                RETURNGUARD_RESOURCE_DIR)
-            break()
-        endif()
-    endforeach()
-endif()
-
 if(RETURNGUARD_RESOURCE_DIR)
     message(STATUS "Clang resource directory: ${RETURNGUARD_RESOURCE_DIR}")
 else()
@@ -75,7 +63,7 @@ add_executable(returnguard
     src/CompilationSetup.cpp
     src/Options.cpp
     src/Frontend.cpp
-    src/internal/Analyzer.cpp
+    src/internal/AnalyzerInstrumentation.cpp
     src/internal/AnalyzerCalls.cpp
     src/internal/AnalyzerControlFlow.cpp
     src/internal/AnalyzerDiagnostics.cpp
@@ -92,9 +80,25 @@ add_executable(returnguard
     src/internal/DomainUtils.cpp
     src/internal/HandlerFinder.cpp
     src/internal/IfChain.cpp
+    src/internal/Instrumentation.cpp
     src/internal/NullStateAnalysis.cpp
     src/internal/ReturnCollector.cpp
     src/internal/ValueSetInference.cpp
+)
+
+add_library(returnguard_runtime STATIC
+    runtime/Runtime.c
+)
+set_target_properties(returnguard_runtime PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
+)
+target_include_directories(returnguard_runtime
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:include>"
 )
 
 target_include_directories(returnguard
@@ -133,7 +137,9 @@ if(TARGET clang-cpp)
 elseif(TARGET clangTooling)
     target_link_libraries(returnguard PRIVATE
         clangTooling
+        clangToolingCore
         clangFrontend
+        clangRewrite
         clangAST
         clangBasic
         clangLex
@@ -175,9 +181,15 @@ else()
 endif()
 
 include(GNUInstallDirs)
-install(TARGETS returnguard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS returnguard returnguard_runtime
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 install(
-    FILES include/returnguard/Nullability.h
+    FILES
+        include/returnguard/Nullability.h
+        include/returnguard/Runtime.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/returnguard
 )
 install(
