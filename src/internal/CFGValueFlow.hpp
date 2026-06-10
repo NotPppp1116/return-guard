@@ -2,11 +2,12 @@
 
 #include "Model.hpp"
 
+#include <clang/Analysis/CFG.h>
+
 #include <memory>
 
 namespace clang {
 class ASTContext;
-class CFG;
 class CallExpr;
 class FunctionDecl;
 } // namespace clang
@@ -15,8 +16,6 @@ namespace returnguard::internal {
 
 class CFGValueFlow final {
   public:
-    ~CFGValueFlow();
-
     static std::unique_ptr<CFGValueFlow> build(
         const clang::FunctionDecl& function,
         clang::ASTContext& context);
