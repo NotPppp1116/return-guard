@@ -65,6 +65,31 @@ class AssignmentCollector final : public clang::RecursiveASTVisitor<AssignmentCo
         return true;
     }
 
+    bool VisitIfStmt(clang::IfStmt* if_stmt) {
+        // Condition might have assignments if it's an assignment expression
+        return true;
+    }
+
+    bool VisitSwitchStmt(clang::SwitchStmt* sw) {
+        if (!expression_references_variable(sw->getCond(), target_)) {
+            // If the switch condition doesn't involve the target, 
+            // the body might still have assignments.
+            return true; 
+        }
+        return true;
+    }
+
+    bool VisitStmt(clang::Stmt* s) {
+        if (const auto* ds = llvm::dyn_cast<clang::DeclStmt>(s)) {
+            for (const auto* d : ds->decls()) {
+                if (d == target_) {
+                    // Initialization is handled separately
+                }
+            }
+        }
+        return true;
+    }
+
     bool valid_ = true;
     std::vector<const clang::Expr*> assignments_;
     const clang::VarDecl* target_;
@@ -192,7 +217,11 @@ std::optional<Domain> Analyzer::expression_domain(
 
     if (const auto* reference = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
         if (const auto* variable = llvm::dyn_cast<clang::VarDecl>(reference->getDecl())) {
-            if (variable->isLocalVarDecl() && !llvm::isa<clang::ParmVarDecl>(variable)) {
+            if (llvm::isa<clang::ParmVarDecl>(variable)) {
+                return std::nullopt;
+            }
+
+            if (variable->isLocalVarDecl()) {
                 if (active_variables.contains(variable)) {
                     return std::nullopt;
                 }
@@ -213,7 +242,14 @@ std::optional<Domain> Analyzer::expression_domain(
                         combined.inferred_from_body = true;
                         combined.type_name = variable->getType().getAsString();
 
-                        for (const clang::Expr* assignment : collector.assignments_) {
+                        std::vector<const clang::Expr*> reaching_assignments;
+                        // Simple reaching definition analysis:
+                        // For a local variable, we look at all assignments.
+                        // We filter out those that are strictly before a later unconditional assignment.
+                        // For now, let's just use all found assignments as it is safer.
+                        reaching_assignments = collector.assignments_;
+
+                        for (const clang::Expr* assignment : reaching_assignments) {
                             auto part = expression_domain(
                                 assignment, active_functions, active_variables);
                             if (!part || !part->finite) {
@@ -254,16 +290,18 @@ std::optional<Domain> Analyzer::expression_domain(
             return std::nullopt;
         }
 
+        Domain combined = *true_domain;
         for (DomainValue& value : false_domain->values) {
             if (value.labels.empty()) {
-                add_domain_value(*true_domain, value.value, "");
+                add_domain_value(combined, value.value, "");
                 continue;
             }
             for (const std::string& label : value.labels) {
-                add_domain_value(*true_domain, value.value, label);
+                add_domain_value(combined, value.value, label);
             }
         }
-        return true_domain;
+        combined.inferred_from_body = true;
+        return combined;
     }
 
     if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expression)) {
@@ -323,7 +361,6 @@ Domain Analyzer::function_domain(
         std::optional<Domain> part = expression_domain(return_expression, active, variables);
         if (!part.has_value() || !part->finite) {
             inferred.finite = false;
-            inferred.values.clear();
             break;
         }
 
@@ -340,11 +377,13 @@ Domain Analyzer::function_domain(
 
     active.erase(canonical);
 
-    if (!inferred.finite && by_type.finite) {
+    if (!inferred.finite) {
+        active.erase(canonical);
         domain_cache_[canonical] = by_type;
         return by_type;
     }
 
+    inferred.inferred_from_body = true;
     domain_cache_[canonical] = inferred;
     return inferred;
 }
