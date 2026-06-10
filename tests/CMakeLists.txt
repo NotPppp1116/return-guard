@@ -73,8 +73,8 @@ add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4,
 add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.safety safety.c practical 6 "returnguard safety")
 add_returnguard_test(returnguard.safety_cpp safety.cpp practical 6 "returnguard safety")
-add_returnguard_test(returnguard.safety_lifetime safety_lifetime.c practical 5 "returnguard safety")
-add_returnguard_test(returnguard.safety_lifetime_cpp safety_lifetime.cpp practical 2 "returnguard safety")
+add_returnguard_test(returnguard.safety_lifetime safety_lifetime.c practical 9 "returnguard safety")
+add_returnguard_test(returnguard.safety_lifetime_cpp safety_lifetime.cpp practical 4 "returnguard safety")
 add_returnguard_test(
     returnguard.complex_array_index_and_oob complex_array_index_and_oob.c practical 1
     "nullable_bytes")

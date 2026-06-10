@@ -3,6 +3,7 @@
 #include <string.h>
 
 void sink_int_ptr(int* value);
+int* external_int_ptr(void);
 
 int alias_free_deref(void) {
     int* p = (int*)malloc(sizeof(int));
@@ -56,4 +57,28 @@ int pass_freed_to_function(void) {
     free(p);
     sink_int_ptr(p);
     return 0;
+}
+
+int parameter_uaf(int* p) {
+    free(p);
+    return *p;
+}
+
+int parameter_double_free(int* p) {
+    free(p);
+    free(p);
+    return 0;
+}
+
+int unknown_return_uaf(void) {
+    int* p = external_int_ptr();
+    free(p);
+    return *p;
+}
+
+int realloc_assignment_tracks_new_value(int* p) {
+    p = (int*)realloc(p, sizeof(int));
+    if (p == NULL) return 0;
+    free(p);
+    return *p;
 }

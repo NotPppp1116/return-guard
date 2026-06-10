@@ -169,6 +169,11 @@ bool is_allocation_call(const clang::CallExpr* call) {
     return name == "malloc" || name == "calloc" || name == "aligned_alloc";
 }
 
+bool returns_pointer(const clang::Expr* expression) {
+    return expression != nullptr && !expression->getType().isNull() &&
+           expression->getType()->isPointerType();
+}
+
 const clang::Expr* ignore_pointer_casts(const clang::Expr* expression) {
     return expression == nullptr ? nullptr : expression->IgnoreParenCasts();
 }
@@ -180,6 +185,11 @@ bool is_deallocation_call(const clang::CallExpr* call) {
     }
     const llvm::StringRef name = callee->getName();
     return name == "free" || name == "realloc";
+}
+
+bool is_realloc_call(const clang::CallExpr* call) {
+    const clang::FunctionDecl* callee = call == nullptr ? nullptr : call->getDirectCallee();
+    return callee != nullptr && callee->getName() == "realloc";
 }
 
 class LifetimeTransfer final {
@@ -229,7 +239,15 @@ class LifetimeTransfer final {
         }
 
         if (const auto* reference = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
-            return state_.value(llvm::dyn_cast<clang::ValueDecl>(reference->getDecl()));
+            const auto* declaration = llvm::dyn_cast<clang::ValueDecl>(reference->getDecl());
+            PointerValue value = state_.value(declaration);
+            if (value.tokens.empty() && declaration != nullptr &&
+                declaration->getType()->isPointerType() &&
+                !llvm::isa<clang::FunctionDecl>(declaration)) {
+                state_.set_fresh(declaration);
+                value = state_.value(declaration);
+            }
+            return value;
         }
 
         if (const auto* cast = llvm::dyn_cast<clang::CastExpr>(expression)) {
@@ -322,12 +340,14 @@ class LifetimeTransfer final {
         return {};
     }
 
-    PointerValue evaluate_call(const clang::CallExpr* call) {
+    PointerValue evaluate_call(const clang::CallExpr* call, bool diagnose_repeated_free = true) {
         propagate_memcpy_pointer_copy(call);
 
         if (is_deallocation_call(call) && call->getNumArgs() > 0) {
             PointerValue argument = evaluate(call->getArg(0));
-            diagnose_double_free(call, argument);
+            if (diagnose_repeated_free) {
+                diagnose_double_free(call, argument);
+            }
             state_.mark_freed(argument, call);
             for (unsigned index = 1; index < call->getNumArgs(); ++index) {
                 evaluate(call->getArg(index));
@@ -344,7 +364,7 @@ class LifetimeTransfer final {
             PointerValue value = evaluate(argument);
             diagnose_uaf(argument, value);
         }
-        return {};
+        return returns_pointer(call) ? PointerValue{} : PointerValue{};
     }
 
     void assign(const clang::ValueDecl* target, const clang::Expr* rhs) {
@@ -360,13 +380,22 @@ class LifetimeTransfer final {
             state_.set_fresh(target);
             return;
         }
+        if (is_realloc_call(call)) {
+            evaluate_call(call, false);
+            state_.set_fresh(target);
+            return;
+        }
         if (llvm::isa_and_nonnull<clang::CXXNewExpr>(ignore_pointer_casts(rhs))) {
             state_.set_fresh(target);
             return;
         }
         PointerValue value = evaluate(rhs);
         if (value.tokens.empty()) {
-            state_.kill(target);
+            if (returns_pointer(ignore_pointer_casts(rhs))) {
+                state_.set_fresh(target);
+            } else {
+                state_.kill(target);
+            }
             return;
         }
         state_.set(target, std::move(value));
@@ -476,7 +505,13 @@ void analyze_lifetime(const clang::FunctionDecl* function, clang::ASTContext& co
     std::vector<std::optional<LifetimeState>> inputs(block_count);
     std::deque<const clang::CFGBlock*> worklist;
     const clang::CFGBlock& entry = cfg->getEntry();
-    inputs[entry.getBlockID()] = LifetimeState{};
+    LifetimeState entry_state;
+    for (const clang::ParmVarDecl* parameter : function->parameters()) {
+        if (parameter != nullptr && parameter->getType()->isPointerType()) {
+            entry_state.set_fresh(parameter);
+        }
+    }
+    inputs[entry.getBlockID()] = std::move(entry_state);
     worklist.push_back(&entry);
 
     while (!worklist.empty()) {
