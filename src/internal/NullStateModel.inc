@@ -25,14 +25,20 @@ PointerFact join_fact(PointerFact lhs, PointerFact rhs) {
     if (lhs.origin == Origin::No && rhs.origin == Origin::No) {
         return {};
     }
-    if (lhs.origin != rhs.origin) {
-        return {
-            .origin = Origin::Maybe,
-            .null_state = NullState::MaybeNull,
-        };
+
+    if (lhs.origin == Origin::No) {
+        rhs.origin = Origin::Maybe;
+        return rhs;
     }
+    if (rhs.origin == Origin::No) {
+        lhs.origin = Origin::Maybe;
+        return lhs;
+    }
+
     return {
-        .origin = lhs.origin,
+        .origin = lhs.origin == Origin::Yes && rhs.origin == Origin::Yes
+                      ? Origin::Yes
+                      : Origin::Maybe,
         .null_state = join_null_state(lhs.null_state, rhs.null_state),
     };
 }
@@ -58,10 +64,8 @@ struct State {
     void refine(NullState null_state) {
         for (auto& [declaration, value] : values) {
             (void)declaration;
-            if (value.origin == Origin::Yes) {
+            if (value.origin != Origin::No) {
                 value.null_state = null_state;
-            } else if (value.origin == Origin::Maybe) {
-                value.null_state = NullState::MaybeNull;
             }
         }
     }
@@ -193,7 +197,7 @@ BranchConstraint condition_constraint(
     }
 
     const PointerFact direct = fact_for_expression(expression, state, target);
-    if (direct.origin == Origin::Yes && expression->getType()->isPointerType()) {
+    if (direct.origin != Origin::No && expression->getType()->isPointerType()) {
         return {
             .recognized = true,
             .true_state = NullState::NonNull,
@@ -211,8 +215,8 @@ BranchConstraint condition_constraint(
     const PointerFact lhs = fact_for_expression(binary->getLHS(), state, target);
     const PointerFact rhs = fact_for_expression(binary->getRHS(), state, target);
     const bool target_and_null =
-        (lhs.origin == Origin::Yes && is_null_pointer_constant(binary->getRHS(), context)) ||
-        (rhs.origin == Origin::Yes && is_null_pointer_constant(binary->getLHS(), context));
+        (lhs.origin != Origin::No && is_null_pointer_constant(binary->getRHS(), context)) ||
+        (rhs.origin != Origin::No && is_null_pointer_constant(binary->getLHS(), context));
     if (!target_and_null) {
         return {};
     }
