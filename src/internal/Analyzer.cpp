@@ -1,6 +1,7 @@
 #include "Analyzer.hpp"
 
 #include "CFGValueFlow.hpp"
+#include "NullStateAnalysis.hpp"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Expr.h>
@@ -22,7 +23,9 @@ bool Analyzer::shouldVisitImplicitCode() const {
 }
 
 bool Analyzer::VisitCallExpr(clang::CallExpr* call) {
-    analyze_call(call);
+    if (!analyze_nullable_call(call)) {
+        analyze_call(call);
+    }
     return true;
 }
 
