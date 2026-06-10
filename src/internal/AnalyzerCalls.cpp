@@ -15,6 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace returnguard::internal {
@@ -24,6 +25,14 @@ CheckResult exhaustive_result() {
     CheckResult result;
     result.kind = HandlingKind::ExhaustivelyChecked;
     return result;
+}
+
+bool is_commonly_ignored_system_function(llvm::StringRef name) {
+    static const std::unordered_set<std::string> ignored_names = {
+        "printf",    "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf", "vsprintf",
+        "vsnprintf", "memcpy",  "memmove", "memset",   "strcpy",  "strncpy",  "strcat",
+        "strncat",   "putchar", "putc",    "puts",     "fwrite"};
+    return ignored_names.contains(name.str());
 }
 
 } // namespace
@@ -185,7 +194,8 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
     }
 
     if (const clang::FunctionDecl* callee = call->getDirectCallee()) {
-        if (source_manager_.isInSystemHeader(callee->getLocation())) {
+        if (source_manager_.isInSystemHeader(callee->getLocation()) &&
+            is_commonly_ignored_system_function(callee->getName())) {
             return;
         }
     }
