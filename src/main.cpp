@@ -1,8 +1,11 @@
+#include "CompilationSetup.hpp"
+
 #include <returnguard/Frontend.hpp>
 #include <returnguard/Options.hpp>
 
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
+#include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Error.h>
@@ -11,6 +14,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -79,12 +83,24 @@ returnguard::Mode parse_mode(llvm::StringRef value) {
 int main(int argc, const char** argv) {
     llvm::InitLLVM init_llvm(argc, argv);
 
+    std::vector<std::string> argument_storage(argv, argv + argc);
+    if (const auto build_path = returnguard::discover_compilation_database(
+            llvm::ArrayRef<const char*>(argv, static_cast<size_t>(argc)))) {
+        argument_storage.insert(argument_storage.begin() + 1, "-p=" + *build_path);
+    }
+
+    std::vector<const char*> parser_arguments;
+    parser_arguments.reserve(argument_storage.size());
+    for (const std::string& argument : argument_storage) {
+        parser_arguments.push_back(argument.c_str());
+    }
+    int parser_argument_count = static_cast<int>(parser_arguments.size());
+
     auto parser = clang::tooling::CommonOptionsParser::create(
-        argc,
-        argv,
+        parser_argument_count,
+        parser_arguments.data(),
         category,
         llvm::cl::OneOrMore);
-
     if (!parser) {
         llvm::errs() << llvm::toString(parser.takeError()) << '\n';
         return 2;
@@ -103,6 +119,8 @@ int main(int argc, const char** argv) {
     clang::tooling::ClangTool tool(
         parser->getCompilations(),
         parser->getSourcePathList());
+    tool.appendArgumentsAdjuster(parser->getArgumentsAdjuster());
+    tool.appendArgumentsAdjuster(returnguard::resource_directory_adjuster());
 
     returnguard::ActionFactory factory;
     return tool.run(&factory);
