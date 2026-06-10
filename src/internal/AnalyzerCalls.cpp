@@ -10,6 +10,7 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
+#include <clang/Basic/SourceManager.h>
 
 #include <optional>
 #include <sstream>
@@ -181,6 +182,12 @@ bool Analyzer::should_report(const CheckResult& result, const Domain& domain) co
 void Analyzer::analyze_call(clang::CallExpr* call) {
     if (!should_analyze_location(call->getExprLoc())) {
         return;
+    }
+
+    if (const clang::FunctionDecl* callee = call->getDirectCallee()) {
+        if (source_manager_.isInSystemHeader(callee->getLocation())) {
+            return;
+        }
     }
 
     if (!returnguard::options().include_operators && call_is_operator(call)) {

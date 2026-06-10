@@ -8,3 +8,7 @@ int cpp_call_site() {
     return 1;
 }
 
+void cpp_explicit_discard() {
+    using void_t = void;
+    void_t((void)annotated_status());
+}

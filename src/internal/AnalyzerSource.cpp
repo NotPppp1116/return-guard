@@ -12,8 +12,7 @@
 
 namespace returnguard::internal {
 
-clang::SourceLocation Analyzer::user_file_location(
-    clang::SourceLocation location) const {
+clang::SourceLocation Analyzer::user_file_location(clang::SourceLocation location) const {
     if (location.isInvalid()) {
         return location;
     }
@@ -36,26 +35,18 @@ bool Analyzer::should_analyze_location(clang::SourceLocation location) const {
 }
 
 std::string Analyzer::source_text(clang::SourceRange range) const {
-    clang::CharSourceRange char_range =
-        clang::CharSourceRange::getTokenRange(range);
+    clang::CharSourceRange char_range = clang::CharSourceRange::getTokenRange(range);
 
-    char_range = clang::Lexer::makeFileCharRange(
-        char_range,
-        source_manager_,
-        context_.getLangOpts());
+    char_range =
+        clang::Lexer::makeFileCharRange(char_range, source_manager_, context_.getLangOpts());
     if (char_range.isInvalid()) {
         return {};
     }
 
-    return clang::Lexer::getSourceText(
-               char_range,
-               source_manager_,
-               context_.getLangOpts())
-        .str();
+    return clang::Lexer::getSourceText(char_range, source_manager_, context_.getLangOpts()).str();
 }
 
-const clang::FunctionDecl* Analyzer::enclosing_function(
-    const clang::Stmt* statement) const {
+const clang::FunctionDecl* Analyzer::enclosing_function(const clang::Stmt* statement) const {
     clang::DynTypedNode node = clang::DynTypedNode::create(*statement);
     for (unsigned depth = 0; depth < 128U; ++depth) {
         const auto parents = context_.getParents(node);
@@ -84,6 +75,9 @@ bool Analyzer::is_explicit_void_discard(const clang::CallExpr* call) const {
             return cast->getType()->isVoidType();
         }
         if (const auto* cast = parent.get<clang::CXXStaticCastExpr>()) {
+            return cast->getType()->isVoidType();
+        }
+        if (const auto* cast = parent.get<clang::CXXFunctionalCastExpr>()) {
             return cast->getType()->isVoidType();
         }
 
