@@ -15,6 +15,8 @@ namespace returnguard::internal {
 
 class CFGValueFlow final {
   public:
+    ~CFGValueFlow();
+
     static std::unique_ptr<CFGValueFlow> build(
         const clang::FunctionDecl& function,
         clang::ASTContext& context);
