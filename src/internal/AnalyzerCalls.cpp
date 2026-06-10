@@ -98,7 +98,15 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
     }
 
     if (const clang::VarDecl* variable = variable_initialized_by_call(call)) {
-        return analyze_variable(call, variable, domain);
+        CheckResult result = analyze_variable(call, variable, domain);
+        if (result.kind == HandlingKind::ExhaustivelyChecked ||
+            result.kind == HandlingKind::Forwarded) {
+            return result;
+        }
+        if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
+            return *flow;
+        }
+        return result;
     }
 
     if (const clang::VarDecl* variable = variable_assigned_from_call(call)) {
@@ -109,13 +117,26 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
         if (const clang::Expr* condition = enclosing_assignment_condition(call, variable)) {
             return analyze_condition(condition, variable, domain);
         }
-        return analyze_variable(call, variable, domain);
+
+        CheckResult result = analyze_variable(call, variable, domain);
+        if (result.kind == HandlingKind::ExhaustivelyChecked ||
+            result.kind == HandlingKind::Forwarded) {
+            return result;
+        }
+        if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
+            return *flow;
+        }
+        return result;
     }
 
     if (call_is_forwarded(call)) {
         CheckResult result;
         result.kind = HandlingKind::Forwarded;
         return result;
+    }
+
+    if (std::optional<CheckResult> flow = analyze_flow_aliases(call, domain)) {
+        return *flow;
     }
 
     if (call_is_discarded_expression(call)) {
