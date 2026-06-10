@@ -30,7 +30,25 @@ bool is_comma_rhs(const clang::Expr* parent, const clang::Expr* child) {
 }
 
 bool propagates_value(const clang::Expr* parent, const clang::Expr* child) {
-    return is_transparent_wrapper(parent) || is_comma_rhs(parent, child);
+    if (is_transparent_wrapper(parent) || is_comma_rhs(parent, child)) {
+        return true;
+    }
+
+    if (const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(parent)) {
+        return binary->isAdditiveOp() || binary->isMultiplicativeOp() || binary->isBitwiseOp() ||
+               binary->isShiftOp();
+    }
+
+    if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(parent)) {
+        return unary->getOpcode() == clang::UO_Minus || unary->getOpcode() == clang::UO_Plus ||
+               unary->getOpcode() == clang::UO_Not || unary->getOpcode() == clang::UO_LNot;
+    }
+
+    if (llvm::isa<clang::ConditionalOperator>(parent)) {
+        return true;
+    }
+
+    return false;
 }
 
 bool carries_if_condition(const clang::Expr* parent, const clang::Expr* child) {

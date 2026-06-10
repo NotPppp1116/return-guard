@@ -152,3 +152,14 @@ void test_fragmented_exhaustive(int x, int y) {
     int s = fragmented_returns(x, y);
     if (s == 100 || s == 101 || s == 102 || s == 200 || s == 201 || s == 300) return;
 } // Should NOT warn
+
+int get_1(void) { return 1; }
+int get_2(void) { return 2; }
+int arithmetic_inference(void) {
+    return get_1() + get_2();
+}
+
+void test_arithmetic_inference(void) {
+    int s = arithmetic_inference();
+    if (s == 3) return;
+} // Should NOT warn

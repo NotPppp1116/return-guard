@@ -93,6 +93,7 @@ add_executable(returnguard
     src/internal/IfChain.cpp
     src/internal/NullStateAnalysis.cpp
     src/internal/ReturnCollector.cpp
+    src/internal/ValueSetInference.cpp
 )
 
 target_include_directories(returnguard

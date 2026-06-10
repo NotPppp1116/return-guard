@@ -66,6 +66,15 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
                                                 const ExpressionSet& aliases,
                                                 const Domain& domain) const;
 
+    [[nodiscard]] std::optional<Domain>
+    expression_domain(const clang::Expr* expression,
+                      std::unordered_set<const clang::FunctionDecl*>& active_functions,
+                      std::unordered_set<const clang::VarDecl*>& active_variables);
+    [[nodiscard]] Domain function_domain(const clang::FunctionDecl* function,
+                                         std::unordered_set<const clang::FunctionDecl*>& active);
+    [[nodiscard]] Domain function_domain(const clang::FunctionDecl* function);
+    [[nodiscard]] Domain call_domain(const clang::CallExpr* call);
+
   private:
     friend class HandlerFinder;
 
@@ -78,14 +87,6 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] Domain enum_domain(const clang::EnumDecl* declaration) const;
     [[nodiscard]] Domain type_domain(clang::QualType type) const;
     [[nodiscard]] Domain annotation_domain(const clang::FunctionDecl* function) const;
-    [[nodiscard]] std::optional<Domain>
-    expression_domain(const clang::Expr* expression,
-                      std::unordered_set<const clang::FunctionDecl*>& active_functions,
-                      std::unordered_set<const clang::VarDecl*>& active_variables);
-    [[nodiscard]] Domain function_domain(const clang::FunctionDecl* function,
-                                         std::unordered_set<const clang::FunctionDecl*>& active);
-    [[nodiscard]] Domain function_domain(const clang::FunctionDecl* function);
-    [[nodiscard]] Domain call_domain(const clang::CallExpr* call);
 
     [[nodiscard]] const clang::VarDecl*
     variable_initialized_by_call(const clang::CallExpr* call) const;
