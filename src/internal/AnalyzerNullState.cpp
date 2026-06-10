@@ -11,7 +11,6 @@
 #include <clang/AST/Type.h>
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/Specifiers.h>
-#include <llvm/ADT/StringRef.h>
 
 #include <memory>
 #include <string>
@@ -89,22 +88,22 @@ NullStateAnalysis* Analyzer::null_state_analysis(
     return result;
 }
 
-bool Analyzer::analyze_nullable_call(const clang::CallExpr* call) {
+void Analyzer::analyze_nullable_call(const clang::CallExpr* call) {
     if (!should_analyze_location(call->getExprLoc()) ||
         !call_returns_nullable_pointer(call)) {
-        return false;
+        return;
     }
 
     const clang::FunctionDecl* function = enclosing_function(call);
     NullStateAnalysis* analysis = null_state_analysis(function);
     if (analysis == nullptr) {
-        return false;
+        return;
     }
 
     const std::vector<const clang::Expr*> unsafe =
         analysis->unsafe_dereferences_for(*call);
     if (unsafe.empty()) {
-        return false;
+        return;
     }
 
     clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
@@ -140,7 +139,6 @@ bool Analyzer::analyze_nullable_call(const clang::CallExpr* call) {
         diagnostics.Report(call_location, note_id)
             << "pointer returned here is marked nullable";
     }
-    return true;
 }
 
 } // namespace returnguard::internal
