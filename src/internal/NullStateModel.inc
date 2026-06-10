@@ -45,6 +45,7 @@ PointerFact join_fact(PointerFact lhs, PointerFact rhs) {
 
 struct State {
     std::unordered_map<const clang::ValueDecl*, PointerFact> values;
+    const clang::ValueDecl* refinement_subject = nullptr;
 
     bool operator==(const State&) const = default;
 
@@ -61,9 +62,14 @@ struct State {
         values[declaration] = value;
     }
 
-    void refine(
-        const clang::ValueDecl* subject,
-        NullState null_state) {
+    void prepare_refinement(const clang::ValueDecl* subject) {
+        refinement_subject = subject;
+    }
+
+    void refine(NullState null_state) {
+        const clang::ValueDecl* subject = refinement_subject;
+        refinement_subject = nullptr;
+
         if (subject != nullptr) {
             PointerFact subject_fact = fact(subject);
             if (subject_fact.origin == Origin::Maybe) {
@@ -193,6 +199,20 @@ struct BranchConstraint {
     NullState false_state = NullState::MaybeNull;
 };
 
+BranchConstraint make_constraint(
+    State& state,
+    const clang::ValueDecl* subject,
+    NullState true_state,
+    NullState false_state) {
+    state.prepare_refinement(subject);
+    return {
+        .recognized = true,
+        .subject = subject,
+        .true_state = true_state,
+        .false_state = false_state,
+    };
+}
+
 BranchConstraint invert_constraint(BranchConstraint constraint) {
     if (constraint.recognized) {
         std::swap(constraint.true_state, constraint.false_state);
@@ -202,7 +222,7 @@ BranchConstraint invert_constraint(BranchConstraint constraint) {
 
 BranchConstraint condition_constraint(
     const clang::Expr* expression,
-    const State& state,
+    State& state,
     const clang::CallExpr& target,
     const clang::ASTContext& context) {
     expression = strip_expr(expression);
@@ -218,12 +238,11 @@ BranchConstraint condition_constraint(
 
     const PointerFact direct = fact_for_expression(expression, state, target);
     if (direct.origin != Origin::No && expression->getType()->isPointerType()) {
-        return {
-            .recognized = true,
-            .subject = lvalue_declaration(expression),
-            .true_state = NullState::NonNull,
-            .false_state = NullState::Null,
-        };
+        return make_constraint(
+            state,
+            lvalue_declaration(expression),
+            NullState::NonNull,
+            NullState::Null);
     }
 
     const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(expression);
@@ -247,18 +266,17 @@ BranchConstraint condition_constraint(
         return {};
     }
 
+    const clang::ValueDecl* subject = lvalue_declaration(subject_expression);
     if (binary->getOpcode() == clang::BO_NE) {
-        return {
-            .recognized = true,
-            .subject = lvalue_declaration(subject_expression),
-            .true_state = NullState::NonNull,
-            .false_state = NullState::Null,
-        };
+        return make_constraint(
+            state,
+            subject,
+            NullState::NonNull,
+            NullState::Null);
     }
-    return {
-        .recognized = true,
-        .subject = lvalue_declaration(subject_expression),
-        .true_state = NullState::Null,
-        .false_state = NullState::NonNull,
-    };
+    return make_constraint(
+        state,
+        subject,
+        NullState::Null,
+        NullState::NonNull);
 }
