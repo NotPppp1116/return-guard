@@ -114,7 +114,7 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] bool call_returns_nullable_pointer(const clang::CallExpr* call) const;
     [[nodiscard]] NullStateAnalysis*
     null_state_analysis(const clang::FunctionDecl* function);
-    [[nodiscard]] bool analyze_nullable_call(const clang::CallExpr* call);
+    void analyze_nullable_call(const clang::CallExpr* call);
 
     [[nodiscard]] std::string function_name(const clang::CallExpr* call) const;
     void emit(const clang::CallExpr* call, llvm::StringRef message,
