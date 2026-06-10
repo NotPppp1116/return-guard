@@ -32,9 +32,16 @@ namespace returnguard::internal {
                                                  const clang::Expr* target,
                                                  const llvm::APSInt& target_value,
                                                  const clang::ASTContext& context);
+[[nodiscard]] Truth evaluate_condition_for_value(const clang::Expr* expression,
+                                                 const ExpressionSet& targets,
+                                                 const llvm::APSInt& target_value,
+                                                 const clang::ASTContext& context);
 [[nodiscard]] bool is_guard_condition(const clang::Expr* expression, const clang::VarDecl* target,
                                       const clang::ASTContext& context);
 [[nodiscard]] bool is_guard_condition(const clang::Expr* expression, const clang::Expr* target,
+                                      const clang::ASTContext& context);
+[[nodiscard]] bool is_guard_condition(const clang::Expr* expression,
+                                      const ExpressionSet& targets,
                                       const clang::ASTContext& context);
 
 } // namespace returnguard::internal
