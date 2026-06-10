@@ -62,6 +62,13 @@ llvm::cl::opt<bool> no_color(
     llvm::cl::init(false),
     llvm::cl::cat(category));
 
+llvm::cl::opt<std::string> instrument_output(
+    "instrument-output",
+    llvm::cl::desc(
+        "Write one transformed source file with fail-closed call checks"),
+    llvm::cl::init(""),
+    llvm::cl::cat(category));
+
 returnguard::Mode parse_mode(llvm::StringRef value) {
     if (value == "practical") {
         return returnguard::Mode::Practical;
@@ -106,6 +113,12 @@ int main(int argc, const char** argv) {
         return 2;
     }
 
+    if (!instrument_output.empty() && parser->getSourcePathList().size() != 1U) {
+        llvm::errs()
+            << "returnguard: --instrument-output requires exactly one source file\n";
+        return 2;
+    }
+
     returnguard::set_options({
         .mode = parse_mode(mode_option),
         .analyze_headers = analyze_headers,
@@ -114,6 +127,7 @@ int main(int argc, const char** argv) {
         .explicit_void_is_handled = explicit_void_is_handled,
         .fail_on_diagnostics = fail_on_diagnostics,
         .color = !no_color,
+        .instrument_output = instrument_output,
     });
 
     clang::tooling::ClangTool tool(
