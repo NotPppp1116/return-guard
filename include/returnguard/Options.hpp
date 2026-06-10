@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 namespace returnguard {
 
 enum class Mode {
@@ -16,6 +18,7 @@ struct Options {
     bool explicit_void_is_handled = true;
     bool fail_on_diagnostics = false;
     bool color = true;
+    std::string instrument_output;
 };
 
 void set_options(Options options);
