@@ -14,6 +14,8 @@ and `.cxx`) translation units.
 - `_Bool` and enum return domains.
 - Finite integer domains supplied through `annotate` attributes on any function
   redeclaration.
+- Explicitly nullable pointer returns, with path-sensitive checks before `*`,
+  `->`, array subscripting, and indirect function calls.
 - Direct `switch (function())` and `if (function())` checks.
 - Results stored in a simple local variable and checked later.
 - `if`/`else if` chains using `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`,
@@ -184,6 +186,32 @@ enum error {
 enum error load_file(void);
 ```
 
+## Nullable pointer returns
+
+Mark a pointer-returning API with Clang's native `_Nullable` qualifier, or use
+the installed helper macro:
+
+```c
+#include <returnguard/Nullability.h>
+
+struct item;
+struct item* RETURNGUARD_NULLABLE find_item(int id);
+```
+
+ReturnGuard follows the result and its local aliases through the Clang CFG. A
+null guard must dominate the dereference on the current path:
+
+```c
+struct item* item = find_item(7);
+if (item == NULL) {
+    return -1;
+}
+return item->value;
+```
+
+See [`docs/nullability.md`](docs/nullability.md) for supported guards,
+short-circuit behavior, annotations, and current boundaries.
+
 ## Important limitations
 
 This is not a complete proof system for C or C++.
@@ -192,10 +220,10 @@ This is not a complete proof system for C or C++.
   enumerate. Visible integer-returning bodies are not treated as closed finite
   domains; use `returnguard.values` annotations when the API really has a small
   finite result set.
-- The current variable tracking is local and syntactic, not a full
-  path-sensitive whole-program analysis.
-- Values copied through several aliases, stored in aggregates, passed through
-  callbacks, or modified between checks may require future dataflow support.
+- Finite-value return tracking is local and largely syntactic. Nullable-pointer
+  tracking is intraprocedural and path-sensitive over Clang's CFG.
+- Values stored in aggregates, passed through callbacks that mutate aliases, or
+  recovered through unknown memory may require future dataflow support.
 - Function-pointer calls expose the return type, but usually not a finite value
   domain unless the type itself is finite.
 - A final `else` or `switch default` is treated as exhaustive by convention. It
