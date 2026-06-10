@@ -114,6 +114,26 @@ int unchecked_conditional_origin(int choose_nullable) {
     return item->value;
 }
 
+int guarded_conditional_alias(int choose_nullable) {
+    struct item fallback = {42};
+    struct item* item = nullable_item();
+    struct item* alias = choose_nullable ? item : &fallback;
+    if (alias == NULL) {
+        return 0;
+    }
+    return alias->value;
+}
+
+int unchecked_original_after_conditional_alias(int choose_fallback) {
+    struct item fallback = {42};
+    struct item* item = nullable_item();
+    struct item* alias = choose_fallback ? &fallback : item;
+    if (alias != NULL) {
+        return item->value;
+    }
+    return 0;
+}
+
 int unchecked_native_nullability(void) {
     struct item* item = native_nullable_item();
     return item->value;
