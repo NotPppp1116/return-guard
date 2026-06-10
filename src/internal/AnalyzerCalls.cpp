@@ -94,11 +94,11 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
     }
 
     if (const clang::IfStmt* statement = enclosing_direct_if(call)) {
-        return analyze_direct_if(statement, call, domain, context_);
+        return analyze_direct_if(statement, call, domain, *this);
     }
 
     if (const clang::Expr* condition = enclosing_direct_loop_condition(call)) {
-        return analyze_direct_condition(condition, call, domain, context_);
+        return analyze_direct_condition(condition, call, domain, *this);
     }
 
     if (enclosing_direct_conditional_condition(call) != nullptr) {

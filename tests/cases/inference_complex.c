@@ -163,3 +163,18 @@ void test_arithmetic_inference(void) {
     int s = arithmetic_inference();
     if (s == 3) return;
 } // Should NOT warn
+
+int get_status_val(void) {
+    return 1;
+}
+
+void test_inferred_condition_exhaustive(void) {
+    int x = get_status_val();
+    if (x == get_status_val()) return;
+} // Should NOT warn
+
+void test_inferred_condition_missing(void) {
+    int x = get_status_val();
+    if (x == 2) return;
+} // Should warn: missing 1
+

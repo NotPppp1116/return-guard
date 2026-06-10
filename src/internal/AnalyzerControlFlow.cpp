@@ -7,9 +7,11 @@
 #include "IfChain.hpp"
 
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
 #include <llvm/Support/Casting.h>
 
+#include <algorithm>
 #include <optional>
 #include <vector>
 
@@ -90,7 +92,8 @@ CheckResult Analyzer::analyze_if_chain(const clang::IfStmt* statement,
         return result;
     }
 
-    if (variable != nullptr && is_guard_condition(statement->getCond(), variable, context_) &&
+    if (variable != nullptr &&
+        is_guard_condition(statement->getCond(), variable, const_cast<Analyzer&>(*this)) &&
         statement_exits(statement->getThen())) {
         result.kind = HandlingKind::ExhaustivelyChecked;
         return result;
@@ -105,8 +108,8 @@ CheckResult Analyzer::analyze_if_chain(const clang::IfStmt* statement,
     for (const DomainValue& value : domain.values) {
         bool handled = false;
         for (const clang::IfStmt* current : chain) {
-            if (evaluate_condition_for_value(current->getCond(), variable, value.value, context_) ==
-                Truth::True) {
+            if (evaluate_condition_for_value(current->getCond(), variable, value.value,
+                                             const_cast<Analyzer&>(*this)) == Truth::True) {
                 handled = true;
                 break;
             }
@@ -134,8 +137,8 @@ CheckResult Analyzer::analyze_condition(const clang::Expr* condition,
     }
 
     for (const DomainValue& value : domain.values) {
-        if (evaluate_condition_for_value(condition, variable, value.value, context_) !=
-            Truth::True) {
+        if (evaluate_condition_for_value(condition, variable, value.value,
+                                         const_cast<Analyzer&>(*this)) != Truth::True) {
             result.missing.push_back(value);
         }
     }
@@ -147,7 +150,7 @@ CheckResult Analyzer::analyze_condition(const clang::Expr* condition,
 }
 
 CheckResult analyze_direct_condition(const clang::Expr* condition, const clang::Expr* target,
-                                     const Domain& domain, const clang::ASTContext& context) {
+                                     const Domain& domain, Analyzer& analyzer) {
     CheckResult result;
     result.kind = HandlingKind::PartiallyChecked;
 
@@ -157,7 +160,7 @@ CheckResult analyze_direct_condition(const clang::Expr* condition, const clang::
     }
 
     for (const DomainValue& value : domain.values) {
-        if (evaluate_condition_for_value(condition, target, value.value, context) != Truth::True) {
+        if (evaluate_condition_for_value(condition, target, value.value, analyzer) != Truth::True) {
             result.missing.push_back(value);
         }
     }
@@ -169,9 +172,8 @@ CheckResult analyze_direct_condition(const clang::Expr* condition, const clang::
 }
 
 CheckResult analyze_direct_fallback_condition(const clang::Expr* condition,
-                                              const clang::Expr* target,
-                                              const Domain& domain,
-                                              const clang::ASTContext& context) {
+                                              const clang::Expr* target, const Domain& domain,
+                                              Analyzer& analyzer) {
     CheckResult result;
     if (condition == nullptr || target == nullptr) {
         result.kind = HandlingKind::PartiallyChecked;
@@ -179,7 +181,7 @@ CheckResult analyze_direct_fallback_condition(const clang::Expr* condition,
         return result;
     }
 
-    result = analyze_direct_condition(condition, target, domain, context);
+    result = analyze_direct_condition(condition, target, domain, analyzer);
     if (!result.detail.empty()) {
         result.detail = "direct conditional expression cannot prove an exhaustive fallback";
     }
@@ -187,7 +189,7 @@ CheckResult analyze_direct_fallback_condition(const clang::Expr* condition,
 }
 
 CheckResult analyze_direct_if(const clang::IfStmt* statement, const clang::Expr* target,
-                              const Domain& domain, const clang::ASTContext& context) {
+                              const Domain& domain, Analyzer& analyzer) {
     if (statement == nullptr) {
         CheckResult result;
         result.kind = HandlingKind::PartiallyChecked;
@@ -201,14 +203,14 @@ CheckResult analyze_direct_if(const clang::IfStmt* statement, const clang::Expr*
         return result;
     }
 
-    if (is_guard_condition(statement->getCond(), target, context) &&
+    if (is_guard_condition(statement->getCond(), target, analyzer) &&
         statement_exits(statement->getThen())) {
         CheckResult result;
         result.kind = HandlingKind::ExhaustivelyChecked;
         return result;
     }
 
-    CheckResult result = analyze_direct_condition(statement->getCond(), target, domain, context);
+    CheckResult result = analyze_direct_condition(statement->getCond(), target, domain, analyzer);
     if (!result.detail.empty()) {
         result.detail = "direct conditional checks have no final else";
     }
