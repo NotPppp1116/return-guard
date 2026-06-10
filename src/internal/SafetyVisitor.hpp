@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clang/AST/RecursiveASTVisitor.h>
+#include <clang/Basic/Diagnostic.h>
 
 #include <memory>
 
@@ -8,6 +9,7 @@ namespace clang {
 class ASTContext;
 class ArraySubscriptExpr;
 class BinaryOperator;
+class CallExpr;
 class CFG;
 class CXXDeleteExpr;
 class Expr;
@@ -30,6 +32,7 @@ class SafetyVisitor final : public clang::RecursiveASTVisitor<SafetyVisitor> {
     SafetyVisitor(
         const clang::FunctionDecl* function,
         clang::ASTContext& context);
+    ~SafetyVisitor();
 
     bool VisitArraySubscriptExpr(clang::ArraySubscriptExpr* subscript);
     bool VisitUnaryOperator(clang::UnaryOperator* unary);
@@ -72,7 +75,7 @@ class SafetyVisitor final : public clang::RecursiveASTVisitor<SafetyVisitor> {
         const clang::Expr* index_expression,
         const clang::Expr* report_site) const;
 
-    [[nodiscard]] unsigned diagnostic_level() const;
+    [[nodiscard]] clang::DiagnosticsEngine::Level diagnostic_level() const;
 
     const clang::FunctionDecl* function_;
     clang::ASTContext& context_;
