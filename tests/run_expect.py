@@ -65,7 +65,7 @@ def main() -> int:
         )
         return 1
 
-    marker = f"{args.diagnostic_kind}: returnguard:"
+    marker = f"{args.diagnostic_kind}: returnguard"
     diagnostic_count = output.count(marker)
     if diagnostic_count != args.warning_count:
         print(output, end="")

@@ -37,3 +37,12 @@ int unsafe_after_join(bool enabled) {
 int unchecked_direct_cpp() {
     return nullable_node()->value;
 }
+
+node* inferred_nullable_node() {
+    return nullable_node();
+}
+
+int unchecked_inferred_cpp() {
+    node* result = inferred_nullable_node();
+    return result->value;
+}

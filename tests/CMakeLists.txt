@@ -53,6 +53,8 @@ add_returnguard_test(returnguard.switches switches.c strict 1 "open-ended")
 add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value of 'annotated_status'")
 add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
+add_returnguard_test(returnguard.safety safety.c practical 6 "returnguard safety")
+add_returnguard_test(returnguard.safety_cpp safety.cpp practical 6 "returnguard safety")
 add_returnguard_test(
     returnguard.null_state null_state.c practical 10
     "is dereferenced without a prior null check"
