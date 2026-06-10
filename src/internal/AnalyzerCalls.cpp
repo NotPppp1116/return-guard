@@ -94,7 +94,7 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
     }
 
     if (const clang::Expr* condition = enclosing_direct_conditional_condition(call)) {
-        return analyze_direct_fallback_condition(condition, call);
+        return analyze_direct_fallback_condition(condition, call, domain, context_);
     }
 
     if (const clang::VarDecl* variable = variable_initialized_by_call(call)) {
@@ -102,10 +102,9 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
     }
 
     if (const clang::VarDecl* variable = variable_assigned_from_call(call)) {
-        if (enclosing_assignment_conditional_condition(call, variable) != nullptr) {
-            CheckResult result;
-            result.kind = HandlingKind::ExhaustivelyChecked;
-            return result;
+        if (const clang::Expr* condition =
+                enclosing_assignment_conditional_condition(call, variable)) {
+            return analyze_condition(condition, variable, domain);
         }
         if (const clang::Expr* condition = enclosing_assignment_condition(call, variable)) {
             return analyze_condition(condition, variable, domain);

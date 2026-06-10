@@ -11,14 +11,13 @@ API is C++, but the analyzed source is ordinary C (`.c` and `.h`).
 
 - Calls returning any non-`void` type.
 - `_Bool` and enum return domains.
-- Finite integer domains inferred from visible function bodies.
 - Finite integer domains supplied through `annotate` attributes on any function
   redeclaration.
 - Direct `switch (function())` and `if (function())` checks.
-- Results stored in a local variable and checked later.
+- Results stored in a simple local variable and checked later.
 - `if`/`else if` chains using `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`,
   and `!` when the conditions can be evaluated for a known finite domain.
-- `switch` cases, GNU case ranges, and `default`.
+- `switch` cases, GNU case ranges, and exhaustive `default`.
 - Explicit discards such as `(void)function()`.
 - Calls and constants created by function-like and object-like macros.
 - Compilation databases, include directories, command-line definitions, and
@@ -60,7 +59,9 @@ returnguard --mode=practical file.c -- -std=c17
 ### `strict`
 
 Requires every non-`void` result to be checked exhaustively, returned onward,
-or explicitly discarded. Open-ended types need a final `else`/`default`.
+or explicitly discarded. Open-ended integer-like types need a final `else`,
+`switch default`, or an explicit finite domain annotation before ReturnGuard can
+prove exhaustive checking.
 
 ```sh
 returnguard --mode=strict file.c -- -std=c17
@@ -149,7 +150,7 @@ standard, target options, and other frontend flags.
 
 ## Describing return values from a declaration
 
-When a function body is unavailable, annotate a finite integer domain:
+Annotate finite integer domains:
 
 ```c
 #if defined(__clang__) || defined(__GNUC__)
@@ -185,14 +186,17 @@ enum error load_file(void);
 This is not a complete proof system for C.
 
 - An arbitrary `int` function can return more values than static analysis can
-  enumerate. In strict mode, use a final `else` or `default` for open domains.
+  enumerate. Visible integer-returning bodies are not treated as closed finite
+  domains; use `returnguard.values` annotations when the API really has a small
+  finite result set.
 - The current variable tracking is local and syntactic, not a full
   path-sensitive whole-program analysis.
 - Values copied through several aliases, stored in aggregates, passed through
   callbacks, or modified between checks may require future dataflow support.
 - Function-pointer calls expose the return type, but usually not a finite value
   domain unless the type itself is finite.
-- A `default` proves coverage, not that each value has unique behavior.
+- A final `else` or `switch default` is treated as exhaustive by convention. It
+  proves fallback coverage, not that each value has unique behavior.
 
 ## Source layout
 

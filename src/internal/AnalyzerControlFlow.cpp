@@ -169,7 +169,9 @@ CheckResult analyze_direct_condition(const clang::Expr* condition, const clang::
 }
 
 CheckResult analyze_direct_fallback_condition(const clang::Expr* condition,
-                                              const clang::Expr* target) {
+                                              const clang::Expr* target,
+                                              const Domain& domain,
+                                              const clang::ASTContext& context) {
     CheckResult result;
     if (condition == nullptr || target == nullptr) {
         result.kind = HandlingKind::PartiallyChecked;
@@ -177,7 +179,10 @@ CheckResult analyze_direct_fallback_condition(const clang::Expr* condition,
         return result;
     }
 
-    result.kind = HandlingKind::ExhaustivelyChecked;
+    result = analyze_direct_condition(condition, target, domain, context);
+    if (!result.detail.empty()) {
+        result.detail = "direct conditional expression cannot prove an exhaustive fallback";
+    }
     return result;
 }
 

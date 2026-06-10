@@ -180,12 +180,6 @@ void HandlerFinder::mark_condition(const clang::Expr* condition, const clang::Va
     exhaustive_ = std::all_of(covered_.begin(), covered_.end(), [](bool value) { return value; });
 }
 
-void HandlerFinder::mark_fallback_condition(const clang::Expr*) {
-    has_any_check_ = true;
-    exhaustive_ = true;
-    std::fill(covered_.begin(), covered_.end(), true);
-}
-
 bool HandlerFinder::VisitSwitchStmt(clang::SwitchStmt* statement) {
     if (invalidated_ || !occurs_after(statement->getSwitchLoc())) {
         return true;
@@ -267,8 +261,8 @@ bool HandlerFinder::TraverseConditionalOperator(clang::ConditionalOperator* expr
     if (invalidated_ || !occurs_after(expression->getQuestionLoc()) || variable == nullptr) {
         return clang::RecursiveASTVisitor<HandlerFinder>::TraverseConditionalOperator(expression);
     }
-    mark_fallback_condition(expression->getCond());
-    return true;
+    mark_condition(expression->getCond(), variable);
+    return clang::RecursiveASTVisitor<HandlerFinder>::TraverseConditionalOperator(expression);
 }
 
 bool HandlerFinder::TraverseReturnStmt(clang::ReturnStmt* statement) {

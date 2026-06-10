@@ -17,3 +17,10 @@ void open_domain_with_default(int selector) {
         break;
     }
 }
+
+void finite_domain_with_default_only(void) {
+    switch (annotated_status()) {
+    default:
+        break;
+    }
+}

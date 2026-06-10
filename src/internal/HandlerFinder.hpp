@@ -60,7 +60,6 @@ class HandlerFinder final : public clang::RecursiveASTVisitor<HandlerFinder> {
     [[nodiscard]] bool expression_references_tracked(const clang::Stmt* statement) const;
     void add_tracked_variable(const clang::VarDecl* variable);
     void remove_tracked_variable(const clang::VarDecl* variable);
-    void mark_fallback_condition(const clang::Expr* condition);
     void mark_condition(const clang::Expr* condition, const clang::VarDecl* variable);
     void mark_if_chain(const clang::IfStmt* statement, const clang::VarDecl* variable);
     void mark_switch(const clang::SwitchStmt* statement);

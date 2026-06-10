@@ -200,7 +200,7 @@ Domain Analyzer::function_domain(
     ReturnCollector collector(context_, returns);
     collector.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
 
-    if (returns.empty()) {
+    if (returns.empty() || !by_type.finite) {
         active.erase(canonical);
         domain_cache_[canonical] = by_type;
         return by_type;
