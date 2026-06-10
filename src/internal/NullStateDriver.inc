@@ -176,3 +176,84 @@ bool NullStateAnalysis::is_source_nullable_at(
 
     return false;
 }
+
+bool NullStateAnalysis::is_expression_nullable_at(
+    const NullSource& source,
+    const clang::Stmt* stmt,
+    const clang::Expr* expression) const {
+    const unsigned block_count = cfg_->getNumBlockIDs();
+    std::vector<std::optional<State>> inputs(block_count);
+    std::deque<const clang::CFGBlock*> worklist;
+
+    State entry_state;
+    if (source.decl != nullptr) {
+        entry_state.set(source.decl, {
+            .origin = Origin::Yes,
+            .null_state = NullState::MaybeNull
+        });
+    }
+
+    const clang::CFGBlock& entry = cfg_->getEntry();
+    inputs[entry.getBlockID()] = std::move(entry_state);
+    worklist.push_back(&entry);
+
+    while (!worklist.empty()) {
+        const clang::CFGBlock* block = worklist.front();
+        worklist.pop_front();
+
+        State output = *inputs[block->getBlockID()];
+        transfer_block(*block, output, source, nullptr, context_);
+
+        unsigned successor_index = 0U;
+        for (const clang::CFGBlock* successor : block->succs()) {
+            if (successor != nullptr) {
+                State edge = state_for_successor(
+                    *block,
+                    output,
+                    successor_index,
+                    source,
+                    context_);
+                std::optional<State>& input = inputs[successor->getBlockID()];
+                if (!input.has_value()) {
+                    input = std::move(edge);
+                    worklist.push_back(successor);
+                } else {
+                    State merged = *input;
+                    if (merged.join(edge)) {
+                        input = std::move(merged);
+                        worklist.push_back(successor);
+                    }
+                }
+            }
+            ++successor_index;
+        }
+    }
+
+    for (const clang::CFGBlock* block : *cfg_) {
+        if (block == nullptr || !inputs[block->getBlockID()].has_value()) {
+            continue;
+        }
+
+        for (const clang::CFGElement& element : *block) {
+            if (auto cfg_stmt = element.getAs<clang::CFGStmt>()) {
+                if (cfg_stmt->getStmt() == stmt) {
+                    State state = *inputs[block->getBlockID()];
+                    Transfer transfer(state, source, nullptr, context_);
+                    for (const clang::CFGElement& inner_element : *block) {
+                        if (auto inner_cfg_stmt = inner_element.getAs<clang::CFGStmt>()) {
+                            if (inner_cfg_stmt->getStmt() == stmt) {
+                                break;
+                            }
+                            transfer.process(inner_cfg_stmt->getStmt());
+                        }
+                    }
+                    const PointerFact fact =
+                        fact_for_expression(expression, state, source, context_);
+                    return fact.origin != Origin::No && fact.null_state != NullState::NonNull;
+                }
+            }
+        }
+    }
+
+    return false;
+}

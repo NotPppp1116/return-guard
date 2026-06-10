@@ -51,6 +51,26 @@ bool function_returns_nullable_pointer_expression(const clang::Expr* expr,
                                                   clang::ASTContext& context,
                                                   const Analyzer& analyzer);
 
+bool expression_can_return_null_literal(const clang::Expr* expr, clang::ASTContext& context) {
+    if (expr == nullptr) {
+        return false;
+    }
+    const clang::Expr* stripped = expr->IgnoreParenCasts();
+    if (stripped->isNullPointerConstant(context, clang::Expr::NPC_ValueDependentIsNotNull) !=
+        clang::Expr::NPCK_NotNull) {
+        return true;
+    }
+    if (const auto* conditional = llvm::dyn_cast<clang::ConditionalOperator>(stripped)) {
+        return expression_can_return_null_literal(conditional->getTrueExpr(), context) ||
+               expression_can_return_null_literal(conditional->getFalseExpr(), context);
+    }
+    if (const auto* conditional = llvm::dyn_cast<clang::BinaryConditionalOperator>(stripped)) {
+        return expression_can_return_null_literal(conditional->getCommon(), context) ||
+               expression_can_return_null_literal(conditional->getFalseExpr(), context);
+    }
+    return false;
+}
+
 // NullableVariableVisitor was previously defined here but is unused.
 // Removed to eliminate dead code; nullability checks use
 // NullStateAnalysis and helper functions elsewhere in this file.
@@ -186,31 +206,19 @@ bool Analyzer::is_nullable_function_impl(
                     return true;
                 }
 
+                if (expression_can_return_null_literal(stripped, context_)) {
+                    return true;
+                }
+
                 if (const auto* call = llvm::dyn_cast<clang::CallExpr>(stripped)) {
                     if (this->call_returns_nullable_pointer(call)) {
                         return true;
                     }
                 }
 
-                if (const auto* conditional =
-                        llvm::dyn_cast<clang::ConditionalOperator>(stripped)) {
-                    return is_expr_nullable(conditional->getTrueExpr(), return_stmt) ||
-                           is_expr_nullable(conditional->getFalseExpr(), return_stmt);
-                }
-
-                if (const auto* conditional =
-                        llvm::dyn_cast<clang::BinaryConditionalOperator>(stripped)) {
-                    return is_expr_nullable(conditional->getCommon(), return_stmt) ||
-                           is_expr_nullable(conditional->getFalseExpr(), return_stmt);
-                }
-
-                if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(stripped)) {
-                    if (const auto* var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl())) {
-                        for (const NullSource& source : sources) {
-                            if (analysis->is_source_nullable_at(source, return_stmt, var)) {
-                                return true;
-                            }
-                        }
+                for (const NullSource& source : sources) {
+                    if (analysis->is_expression_nullable_at(source, return_stmt, stripped)) {
+                        return true;
                     }
                 }
 

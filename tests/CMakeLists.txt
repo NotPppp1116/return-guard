@@ -105,6 +105,9 @@ add_returnguard_test(
     "is dereferenced without a prior null check"
     --expect "pointer returned here is marked nullable")
 add_returnguard_test(
+    returnguard.null_state_inference null_state_inference.c practical 2
+    "is dereferenced without a prior null check")
+add_returnguard_test(
     returnguard.null_state_strict null_state_strict.c strict 2
     "is dereferenced without a prior null check"
     --expect "consumed but not verified")

@@ -156,7 +156,7 @@ class Transfer final {
 
             if (binary->getOpcode() == clang::BO_LAnd ||
                 binary->getOpcode() == clang::BO_LOr) {
-                return fact_for_expression(expression, state_, target_);
+                return fact_for_expression(expression, state_, target_, context_);
             }
 
             PointerFact lhs = evaluate(binary->getLHS());
@@ -176,7 +176,7 @@ class Transfer final {
 
         if (llvm::isa<clang::ConditionalOperator>(expression) ||
             llvm::isa<clang::BinaryConditionalOperator>(expression)) {
-            return fact_for_expression(expression, state_, target_);
+            return fact_for_expression(expression, state_, target_, context_);
         }
 
         if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expression)) {

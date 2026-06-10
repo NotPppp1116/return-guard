@@ -196,10 +196,99 @@ bool is_null_pointer_constant(
                clang::Expr::NPCK_NotNull;
 }
 
+const clang::ValueDecl* lvalue_declaration(const clang::Expr* expression) {
+    expression = strip_expr(expression);
+    const auto* reference = llvm::dyn_cast_or_null<clang::DeclRefExpr>(expression);
+    return reference == nullptr
+               ? nullptr
+               : llvm::dyn_cast<clang::ValueDecl>(reference->getDecl());
+}
+
+bool same_lvalue_or_expression(const clang::Expr* lhs, const clang::Expr* rhs) {
+    lhs = strip_expr(lhs);
+    rhs = strip_expr(rhs);
+    if (lhs == nullptr || rhs == nullptr) {
+        return false;
+    }
+    const clang::ValueDecl* lhs_decl = lvalue_declaration(lhs);
+    const clang::ValueDecl* rhs_decl = lvalue_declaration(rhs);
+    if (lhs_decl != nullptr || rhs_decl != nullptr) {
+        return lhs_decl != nullptr && lhs_decl == rhs_decl;
+    }
+    return lhs == rhs;
+}
+
+std::optional<NullState> null_state_for_conditional_branch(
+    const clang::Expr* condition,
+    const clang::Expr* branch_expression,
+    bool true_branch,
+    const clang::ASTContext& context) {
+    condition = strip_expr(condition);
+    branch_expression = strip_expr(branch_expression);
+    if (condition == nullptr || branch_expression == nullptr) {
+        return std::nullopt;
+    }
+
+    if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(condition);
+        unary != nullptr && unary->getOpcode() == clang::UO_LNot) {
+        return null_state_for_conditional_branch(
+            unary->getSubExpr(), branch_expression, !true_branch, context);
+    }
+
+    if (same_lvalue_or_expression(condition, branch_expression) &&
+        condition->getType()->isPointerType()) {
+        return true_branch ? NullState::NonNull : NullState::Null;
+    }
+
+    const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(condition);
+    if (binary == nullptr ||
+        (binary->getOpcode() != clang::BO_EQ && binary->getOpcode() != clang::BO_NE)) {
+        return std::nullopt;
+    }
+
+    const clang::Expr* subject = nullptr;
+    if (is_null_pointer_constant(binary->getRHS(), context)) {
+        subject = binary->getLHS();
+    } else if (is_null_pointer_constant(binary->getLHS(), context)) {
+        subject = binary->getRHS();
+    }
+    if (subject == nullptr || !same_lvalue_or_expression(subject, branch_expression)) {
+        return std::nullopt;
+    }
+
+    const bool nonnull_when_true = binary->getOpcode() == clang::BO_NE;
+    return true_branch == nonnull_when_true ? NullState::NonNull : NullState::Null;
+}
+
 PointerFact fact_for_expression(
     const clang::Expr* expression,
     const State& state,
-    const NullSource& target) {
+    const NullSource& target,
+    const clang::ASTContext& context);
+
+PointerFact fact_for_conditional_branch(
+    const clang::Expr* condition,
+    const clang::Expr* branch_expression,
+    bool true_branch,
+    const State& state,
+    const NullSource& target,
+    const clang::ASTContext& context) {
+    PointerFact fact = fact_for_expression(branch_expression, state, target, context);
+    if (fact.origin == Origin::No) {
+        return fact;
+    }
+    if (std::optional<NullState> refined =
+            null_state_for_conditional_branch(condition, branch_expression, true_branch, context)) {
+        fact.null_state = *refined;
+    }
+    return fact;
+}
+
+PointerFact fact_for_expression(
+    const clang::Expr* expression,
+    const State& state,
+    const NullSource& target,
+    const clang::ASTContext& context) {
     expression = strip_expr(expression);
     if (expression == nullptr) {
         return {};
@@ -221,29 +310,29 @@ PointerFact fact_for_expression(
         return state.fact(llvm::dyn_cast<clang::ValueDecl>(reference->getDecl()));
     }
     if (const auto* cast = llvm::dyn_cast<clang::CastExpr>(expression)) {
-        return fact_for_expression(cast->getSubExpr(), state, target);
+        return fact_for_expression(cast->getSubExpr(), state, target, context);
     }
     if (const auto* cleanup = llvm::dyn_cast<clang::ExprWithCleanups>(expression)) {
-        return fact_for_expression(cleanup->getSubExpr(), state, target);
+        return fact_for_expression(cleanup->getSubExpr(), state, target, context);
     }
     if (const auto* opaque = llvm::dyn_cast<clang::OpaqueValueExpr>(expression)) {
-        return fact_for_expression(opaque->getSourceExpr(), state, target);
+        return fact_for_expression(opaque->getSourceExpr(), state, target, context);
     }
     if (const auto* temporary = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(expression)) {
-        return fact_for_expression(temporary->getSubExpr(), state, target);
+        return fact_for_expression(temporary->getSubExpr(), state, target, context);
     }
     if (const auto* temporary = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(expression)) {
-        return fact_for_expression(temporary->getSubExpr(), state, target);
+        return fact_for_expression(temporary->getSubExpr(), state, target, context);
     }
     if (const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(expression)) {
         if (binary->getOpcode() == clang::BO_Assign ||
             binary->getOpcode() == clang::BO_Comma) {
-            return fact_for_expression(binary->getRHS(), state, target);
+            return fact_for_expression(binary->getRHS(), state, target, context);
         }
         if (binary->getOpcode() == clang::BO_Add ||
             binary->getOpcode() == clang::BO_Sub) {
-            const PointerFact lhs = fact_for_expression(binary->getLHS(), state, target);
-            const PointerFact rhs = fact_for_expression(binary->getRHS(), state, target);
+            const PointerFact lhs = fact_for_expression(binary->getLHS(), state, target, context);
+            const PointerFact rhs = fact_for_expression(binary->getRHS(), state, target, context);
             if (lhs.origin == Origin::No) {
                 return rhs;
             }
@@ -255,23 +344,19 @@ PointerFact fact_for_expression(
     }
     if (const auto* conditional = llvm::dyn_cast<clang::ConditionalOperator>(expression)) {
         return join_fact(
-            fact_for_expression(conditional->getTrueExpr(), state, target),
-            fact_for_expression(conditional->getFalseExpr(), state, target));
+            fact_for_conditional_branch(conditional->getCond(), conditional->getTrueExpr(), true,
+                                        state, target, context),
+            fact_for_conditional_branch(conditional->getCond(), conditional->getFalseExpr(), false,
+                                        state, target, context));
     }
     if (const auto* conditional = llvm::dyn_cast<clang::BinaryConditionalOperator>(expression)) {
         return join_fact(
-            fact_for_expression(conditional->getCommon(), state, target),
-            fact_for_expression(conditional->getFalseExpr(), state, target));
+            fact_for_conditional_branch(conditional->getCond(), conditional->getCommon(), true,
+                                        state, target, context),
+            fact_for_conditional_branch(conditional->getCond(), conditional->getFalseExpr(), false,
+                                        state, target, context));
     }
     return {};
-}
-
-const clang::ValueDecl* lvalue_declaration(const clang::Expr* expression) {
-    expression = strip_expr(expression);
-    const auto* reference = llvm::dyn_cast_or_null<clang::DeclRefExpr>(expression);
-    return reference == nullptr
-               ? nullptr
-               : llvm::dyn_cast<clang::ValueDecl>(reference->getDecl());
 }
 
 struct BranchConstraint {
@@ -332,7 +417,7 @@ BranchConstraint condition_constraint(
             unary->getSubExpr(), state, target, context));
     }
 
-    const PointerFact direct = fact_for_expression(expression, state, target);
+    const PointerFact direct = fact_for_expression(expression, state, target, context);
     if (direct.origin != Origin::No && expression->getType()->isPointerType()) {
         return make_constraint(
             state,
@@ -348,8 +433,8 @@ BranchConstraint condition_constraint(
         return {};
     }
 
-    const PointerFact lhs = fact_for_expression(binary->getLHS(), state, target);
-    const PointerFact rhs = fact_for_expression(binary->getRHS(), state, target);
+    const PointerFact lhs = fact_for_expression(binary->getLHS(), state, target, context);
+    const PointerFact rhs = fact_for_expression(binary->getRHS(), state, target, context);
     const clang::Expr* subject_expression = nullptr;
     if (lhs.origin != Origin::No &&
         is_null_pointer_constant(binary->getRHS(), context)) {
