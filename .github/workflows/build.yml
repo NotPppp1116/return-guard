@@ -37,10 +37,21 @@ jobs:
             -DRETURNGUARD_WARNINGS_AS_ERRORS=ON
 
       - name: Build
-        run: cmake --build build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build 2>&1 | tee build-output.log
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Upload failing build log
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-output
+          path: build-output.log
+          if-no-files-found: ignore
 
       - name: Upload failing CTest log
         if: failure()
