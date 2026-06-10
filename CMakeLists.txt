@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(returnguard VERSION 0.5.1 LANGUAGES C CXX)
+project(returnguard VERSION 0.5.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,8 +17,62 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "LLVM_DIR: ${LLVM_DIR}")
 message(STATUS "Clang_DIR: ${Clang_DIR}")
 
+find_program(RETURNGUARD_CLANG_EXECUTABLE
+    NAMES "clang-${LLVM_VERSION_MAJOR}" clang
+    HINTS "${LLVM_TOOLS_BINARY_DIR}"
+    NO_DEFAULT_PATH
+)
+if(NOT RETURNGUARD_CLANG_EXECUTABLE)
+    find_program(RETURNGUARD_CLANG_EXECUTABLE
+        NAMES "clang-${LLVM_VERSION_MAJOR}" clang
+    )
+endif()
+
+set(RETURNGUARD_RESOURCE_DIR "")
+if(RETURNGUARD_CLANG_EXECUTABLE)
+    execute_process(
+        COMMAND "${RETURNGUARD_CLANG_EXECUTABLE}" -print-resource-dir
+        RESULT_VARIABLE RETURNGUARD_RESOURCE_RESULT
+        OUTPUT_VARIABLE RETURNGUARD_RESOURCE_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(RETURNGUARD_RESOURCE_RESULT EQUAL 0
+       AND IS_DIRECTORY "${RETURNGUARD_RESOURCE_OUTPUT}/include")
+        file(TO_CMAKE_PATH
+            "${RETURNGUARD_RESOURCE_OUTPUT}"
+            RETURNGUARD_RESOURCE_DIR)
+    endif()
+endif()
+
+if(NOT RETURNGUARD_RESOURCE_DIR)
+    foreach(LLVM_LIBRARY_DIR IN LISTS LLVM_LIBRARY_DIRS)
+        if(IS_DIRECTORY "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}/include")
+            file(TO_CMAKE_PATH
+                "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}"
+                RETURNGUARD_RESOURCE_DIR)
+            break()
+        endif()
+    endforeach()
+endif()
+
+if(RETURNGUARD_RESOURCE_DIR)
+    message(STATUS "Clang resource directory: ${RETURNGUARD_RESOURCE_DIR}")
+else()
+    message(WARNING
+        "Could not determine Clang's resource directory; builtin headers may "
+        "require an explicit -resource-dir argument")
+endif()
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/BuildConfig.hpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/returnguard/BuildConfig.hpp"
+    @ONLY
+)
+
 add_executable(returnguard
     src/main.cpp
+    src/CompilationSetup.cpp
     src/Options.cpp
     src/Frontend.cpp
     src/internal/Analyzer.cpp
@@ -39,6 +93,7 @@ add_executable(returnguard
 target_include_directories(returnguard
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated"
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
 )

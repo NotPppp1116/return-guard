@@ -76,3 +76,12 @@ add_test(
         "${CMAKE_CURRENT_SOURCE_DIR}/test_project_runner_scaling.py"
         --runner "${RETURNGUARD_PROJECT_RUNNER}"
 )
+
+add_test(
+    NAME returnguard.automatic_compilation_setup
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_auto_compilation_setup.py"
+        --tool "$<TARGET_FILE:returnguard>"
+        --compiler "${CMAKE_C_COMPILER}"
+)
