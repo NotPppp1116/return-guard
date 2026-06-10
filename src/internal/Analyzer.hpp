@@ -80,7 +80,8 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] Domain annotation_domain(const clang::FunctionDecl* function) const;
     [[nodiscard]] std::optional<Domain>
     expression_domain(const clang::Expr* expression,
-                      std::unordered_set<const clang::FunctionDecl*>& active);
+                      std::unordered_set<const clang::FunctionDecl*>& active_functions,
+                      std::unordered_set<const clang::VarDecl*>& active_variables);
     [[nodiscard]] Domain function_domain(const clang::FunctionDecl* function,
                                          std::unordered_set<const clang::FunctionDecl*>& active);
     [[nodiscard]] Domain function_domain(const clang::FunctionDecl* function);
