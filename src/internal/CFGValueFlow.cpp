@@ -198,7 +198,9 @@ class Evaluator final {
             for (const clang::Expr* argument : target_.arguments()) {
                 evaluate(argument);
             }
-            return {.origin = Origin::Yes};
+            Evaluation result;
+            result.origin = Origin::Yes;
+            return result;
         }
 
         if (const auto* paren = llvm::dyn_cast<clang::ParenExpr>(expression)) {
@@ -375,7 +377,10 @@ void transfer_block(
     }
 
     if (aliases != nullptr) {
-        evaluator.evaluate(block.getTerminatorCondition());
+        if (const auto* condition =
+                llvm::dyn_cast_or_null<clang::Expr>(block.getTerminatorCondition())) {
+            evaluator.evaluate(condition);
+        }
     }
 }
 
