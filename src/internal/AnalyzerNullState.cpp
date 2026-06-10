@@ -45,7 +45,8 @@ bool function_has_nullable_annotation(const clang::FunctionDecl& function) {
         if (type_is_nullable(redeclaration->getReturnType())) {
             return true;
         }
-        for (const clang::AnnotateAttr* attribute : redeclaration->specific_attrs<clang::AnnotateAttr>()) {
+        for (const clang::AnnotateAttr* attribute :
+             redeclaration->specific_attrs<clang::AnnotateAttr>()) {
             if (attribute->getAnnotation() == "returnguard.nullable") {
                 return true;
             }
@@ -69,7 +70,7 @@ bool function_is_allocator_like(const clang::FunctionDecl& function) {
         return false;
     }
     for (const clang::FunctionDecl* redeclaration : function.redecls()) {
-        if (redeclaration->hasAttr<clang::MallocAttr>()) {
+        if (redeclaration->hasAttr<clang::RestrictAttr>()) {
             return true;
         }
     }
@@ -83,24 +84,28 @@ bool function_returns_nullable_pointer_expression(const clang::Expr* expression,
         return false;
     }
     const clang::Expr* stripped = expression->IgnoreParenCasts();
-    if (stripped->isNullPointerConstant(context, clang::Expr::NPC_ValueDependentIsNotNull) !=
+    if (stripped->isNullPointerConstant(
+            context,
+            clang::Expr::NPC_ValueDependentIsNotNull) !=
         clang::Expr::NPCK_NotNull) {
         return true;
     }
     if (const auto* call = llvm::dyn_cast<clang::CallExpr>(stripped)) {
         return analyzer.call_returns_nullable_pointer(call);
     }
-    if (const auto* conditional = llvm::dyn_cast<clang::ConditionalOperator>(stripped)) {
-        return function_returns_nullable_pointer_expression(conditional->getTrueExpr(), context,
-                                                            analyzer) ||
-               function_returns_nullable_pointer_expression(conditional->getFalseExpr(), context,
-                                                            analyzer);
+    if (const auto* conditional =
+            llvm::dyn_cast<clang::ConditionalOperator>(stripped)) {
+        return function_returns_nullable_pointer_expression(
+                   conditional->getTrueExpr(), context, analyzer) ||
+               function_returns_nullable_pointer_expression(
+                   conditional->getFalseExpr(), context, analyzer);
     }
-    if (const auto* conditional = llvm::dyn_cast<clang::BinaryConditionalOperator>(stripped)) {
-        return function_returns_nullable_pointer_expression(conditional->getCommon(), context,
-                                                            analyzer) ||
-               function_returns_nullable_pointer_expression(conditional->getFalseExpr(), context,
-                                                            analyzer);
+    if (const auto* conditional =
+            llvm::dyn_cast<clang::BinaryConditionalOperator>(stripped)) {
+        return function_returns_nullable_pointer_expression(
+                   conditional->getCommon(), context, analyzer) ||
+               function_returns_nullable_pointer_expression(
+                   conditional->getFalseExpr(), context, analyzer);
     }
     return false;
 }
@@ -132,7 +137,8 @@ bool Analyzer::is_nullable_function(const clang::FunctionDecl* function) const {
     return is_nullable_function_impl(function, active_nullable_checks_);
 }
 
-bool Analyzer::infer_nullable_function_once(const clang::FunctionDecl* function) const {
+bool Analyzer::infer_nullable_function_once(
+    const clang::FunctionDecl* function) const {
     if (function == nullptr) {
         return false;
     }
@@ -148,10 +154,12 @@ bool Analyzer::is_nullable_function_impl(
     const clang::FunctionDecl* function,
     std::unordered_set<const clang::FunctionDecl*>& active) const {
     const clang::FunctionDecl* canonical = function->getCanonicalDecl();
-    const bool recomputing_summary = summaries_building_ && canonical == nullable_recompute_target_;
+    const bool recomputing_summary =
+        summaries_building_ && canonical == nullable_recompute_target_;
 
     if (!recomputing_summary) {
-        if (const auto iterator = nullable_cache_.find(canonical); iterator != nullable_cache_.end()) {
+        if (const auto iterator = nullable_cache_.find(canonical);
+            iterator != nullable_cache_.end()) {
             return iterator->second;
         }
     }
@@ -178,20 +186,26 @@ bool Analyzer::is_nullable_function_impl(
     if (canonical->hasBody(definition) && definition != nullptr) {
         std::vector<const clang::ReturnStmt*> return_statements;
         ReturnCollector collector(context_, return_statements);
-        collector.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
+        collector.TraverseStmt(
+            const_cast<clang::Stmt*>(definition->getBody()));
 
         NullStateAnalysis* analysis = null_state_analysis(definition);
         if (analysis != nullptr) {
             std::vector<NullSource> sources;
-            for (const clang::ParmVarDecl* parameter : definition->parameters()) {
-                if (parameter != nullptr && type_is_nullable(parameter->getType())) {
+            for (const clang::ParmVarDecl* parameter :
+                 definition->parameters()) {
+                if (parameter != nullptr &&
+                    type_is_nullable(parameter->getType())) {
                     sources.push_back({.decl = parameter});
                 }
             }
 
-            class CallFinder final : public clang::RecursiveASTVisitor<CallFinder> {
+            class CallFinder final
+                : public clang::RecursiveASTVisitor<CallFinder> {
               public:
-                CallFinder(const Analyzer& analyzer, std::vector<NullSource>& sources)
+                CallFinder(
+                    const Analyzer& analyzer,
+                    std::vector<NullSource>& sources)
                     : analyzer_(analyzer), sources_(sources) {}
 
                 bool VisitCallExpr(clang::CallExpr* call) {
@@ -207,36 +221,59 @@ bool Analyzer::is_nullable_function_impl(
             };
 
             CallFinder finder(*this, sources);
-            finder.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
+            finder.TraverseStmt(
+                const_cast<clang::Stmt*>(definition->getBody()));
 
-            std::function<bool(const clang::Expr*, const clang::ReturnStmt*)> expression_is_nullable =
-                [&](const clang::Expr* expression,
-                    const clang::ReturnStmt* return_statement) -> bool {
+            std::function<bool(
+                const clang::Expr*,
+                const clang::ReturnStmt*)>
+                expression_is_nullable =
+                    [&](const clang::Expr* expression,
+                        const clang::ReturnStmt* return_statement) -> bool {
                 if (expression == nullptr) {
                     return false;
                 }
-                const clang::Expr* stripped = expression->IgnoreParenCasts();
-                if (stripped->isNullPointerConstant(context_,
-                                                    clang::Expr::NPC_ValueDependentIsNotNull) !=
+                const clang::Expr* stripped =
+                    expression->IgnoreParenCasts();
+                if (stripped->isNullPointerConstant(
+                        context_,
+                        clang::Expr::NPC_ValueDependentIsNotNull) !=
                     clang::Expr::NPCK_NotNull) {
                     return true;
                 }
-                if (const auto* call = llvm::dyn_cast<clang::CallExpr>(stripped)) {
+                if (const auto* call =
+                        llvm::dyn_cast<clang::CallExpr>(stripped)) {
                     return call_returns_nullable_pointer(call);
                 }
-                if (const auto* conditional = llvm::dyn_cast<clang::ConditionalOperator>(stripped)) {
-                    return expression_is_nullable(conditional->getTrueExpr(), return_statement) ||
-                           expression_is_nullable(conditional->getFalseExpr(), return_statement);
+                if (const auto* conditional =
+                        llvm::dyn_cast<clang::ConditionalOperator>(stripped)) {
+                    return expression_is_nullable(
+                               conditional->getTrueExpr(),
+                               return_statement) ||
+                           expression_is_nullable(
+                               conditional->getFalseExpr(),
+                               return_statement);
                 }
                 if (const auto* conditional =
-                        llvm::dyn_cast<clang::BinaryConditionalOperator>(stripped)) {
-                    return expression_is_nullable(conditional->getCommon(), return_statement) ||
-                           expression_is_nullable(conditional->getFalseExpr(), return_statement);
+                        llvm::dyn_cast<clang::BinaryConditionalOperator>(
+                            stripped)) {
+                    return expression_is_nullable(
+                               conditional->getCommon(),
+                               return_statement) ||
+                           expression_is_nullable(
+                               conditional->getFalseExpr(),
+                               return_statement);
                 }
-                if (const auto* reference = llvm::dyn_cast<clang::DeclRefExpr>(stripped)) {
-                    if (const auto* variable = llvm::dyn_cast<clang::VarDecl>(reference->getDecl())) {
+                if (const auto* reference =
+                        llvm::dyn_cast<clang::DeclRefExpr>(stripped)) {
+                    if (const auto* variable =
+                            llvm::dyn_cast<clang::VarDecl>(
+                                reference->getDecl())) {
                         for (const NullSource& source : sources) {
-                            if (analysis->is_source_nullable_at(source, return_statement, variable)) {
+                            if (analysis->is_source_nullable_at(
+                                    source,
+                                    return_statement,
+                                    variable)) {
                                 return true;
                             }
                         }
@@ -245,19 +282,25 @@ bool Analyzer::is_nullable_function_impl(
                 return false;
             };
 
-            for (const clang::ReturnStmt* return_statement : return_statements) {
+            for (const clang::ReturnStmt* return_statement :
+                 return_statements) {
                 if (return_statement != nullptr &&
-                    expression_is_nullable(return_statement->getRetValue(), return_statement)) {
+                    expression_is_nullable(
+                        return_statement->getRetValue(),
+                        return_statement)) {
                     active.erase(canonical);
                     nullable_cache_[canonical] = true;
                     return true;
                 }
             }
         } else {
-            for (const clang::ReturnStmt* return_statement : return_statements) {
+            for (const clang::ReturnStmt* return_statement :
+                 return_statements) {
                 if (return_statement != nullptr &&
-                    function_returns_nullable_pointer_expression(return_statement->getRetValue(),
-                                                                 context_, *this)) {
+                    function_returns_nullable_pointer_expression(
+                        return_statement->getRetValue(),
+                        context_,
+                        *this)) {
                     active.erase(canonical);
                     nullable_cache_[canonical] = true;
                     return true;
@@ -271,14 +314,17 @@ bool Analyzer::is_nullable_function_impl(
     return false;
 }
 
-NullStateAnalysis* Analyzer::null_state_analysis(const clang::FunctionDecl* function) const {
+NullStateAnalysis* Analyzer::null_state_analysis(
+    const clang::FunctionDecl* function) const {
     if (function == nullptr || null_state_failures_.contains(function)) {
         return nullptr;
     }
-    if (const auto iterator = null_state_cache_.find(function); iterator != null_state_cache_.end()) {
+    if (const auto iterator = null_state_cache_.find(function);
+        iterator != null_state_cache_.end()) {
         return iterator->second.get();
     }
-    std::unique_ptr<NullStateAnalysis> analysis = NullStateAnalysis::build(*function, context_);
+    std::unique_ptr<NullStateAnalysis> analysis =
+        NullStateAnalysis::build(*function, context_);
     if (!analysis) {
         null_state_failures_.insert(function);
         return nullptr;
@@ -289,7 +335,8 @@ NullStateAnalysis* Analyzer::null_state_analysis(const clang::FunctionDecl* func
 }
 
 void Analyzer::analyze_nullable_call(const clang::CallExpr* call) {
-    if (!should_analyze_location(call->getExprLoc()) || !call_returns_nullable_pointer(call)) {
+    if (!should_analyze_location(call->getExprLoc()) ||
+        !call_returns_nullable_pointer(call)) {
         return;
     }
     const clang::FunctionDecl* function = enclosing_function(call);
@@ -297,32 +344,41 @@ void Analyzer::analyze_nullable_call(const clang::CallExpr* call) {
     if (analysis == nullptr) {
         return;
     }
-    const std::vector<const clang::Expr*> unsafe = analysis->unsafe_dereferences_for(*call);
+    const std::vector<const clang::Expr*> unsafe =
+        analysis->unsafe_dereferences_for(*call);
     if (unsafe.empty()) {
         return;
     }
 
     clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
-    const clang::DiagnosticsEngine::Level level = returnguard::options().fail_on_diagnostics
-                                                       ? clang::DiagnosticsEngine::Error
-                                                       : clang::DiagnosticsEngine::Warning;
-    const unsigned diagnostic_id = diagnostics.getCustomDiagID(level, "returnguard: %0");
-    const unsigned note_id =
-        diagnostics.getCustomDiagID(clang::DiagnosticsEngine::Note, "returnguard: %0");
-    const std::string message = "potentially-null return value of '" + function_name(call) +
-                                "' is dereferenced without a prior null check";
+    const clang::DiagnosticsEngine::Level level =
+        returnguard::options().fail_on_diagnostics
+            ? clang::DiagnosticsEngine::Error
+            : clang::DiagnosticsEngine::Warning;
+    const unsigned diagnostic_id = diagnostics.getCustomDiagID(
+        level,
+        "returnguard: %0");
+    const unsigned note_id = diagnostics.getCustomDiagID(
+        clang::DiagnosticsEngine::Note,
+        "returnguard: %0");
+    const std::string message =
+        "potentially-null return value of '" + function_name(call) +
+        "' is dereferenced without a prior null check";
 
-    clang::SourceLocation call_location = user_file_location(call->getExprLoc());
+    clang::SourceLocation call_location =
+        user_file_location(call->getExprLoc());
     if (call_location.isInvalid()) {
         call_location = call->getExprLoc();
     }
     for (const clang::Expr* dereference : unsafe) {
-        clang::SourceLocation location = user_file_location(dereference->getExprLoc());
+        clang::SourceLocation location =
+            user_file_location(dereference->getExprLoc());
         if (location.isInvalid()) {
             location = dereference->getExprLoc();
         }
         diagnostics.Report(location, diagnostic_id) << message;
-        diagnostics.Report(call_location, note_id) << "pointer returned here is nullable";
+        diagnostics.Report(call_location, note_id)
+            << "pointer returned here is marked nullable";
     }
 }
 
