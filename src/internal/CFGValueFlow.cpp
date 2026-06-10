@@ -58,7 +58,13 @@ struct State {
 
     [[nodiscard]] PointsTo pointer(const clang::ValueDecl* declaration) const {
         const auto iterator = pointers.find(declaration);
-        return iterator == pointers.end() ? PointsTo{} : iterator->second;
+        if (iterator != pointers.end()) {
+            return iterator->second;
+        }
+        return {
+            .targets = {},
+            .unknown = declaration != nullptr && declaration->getType()->isPointerType(),
+        };
     }
 
     bool join(const State& other) {
@@ -75,18 +81,32 @@ struct State {
         }
 
         for (const clang::ValueDecl* declaration : value_declarations) {
-            const Origin merged = join_origin(value(declaration), other.value(declaration));
+            const Origin old = value(declaration);
+            const Origin merged = join_origin(old, other.value(declaration));
+            changed = changed || old != merged;
             if (merged == Origin::No) {
-                changed = values.erase(declaration) != 0U || changed;
-                continue;
+                values.erase(declaration);
+            } else {
+                values[declaration] = merged;
             }
-            const auto [iterator, inserted] = values.insert_or_assign(declaration, merged);
-            (void)iterator;
-            changed = changed || inserted || value(declaration) != merged;
         }
 
-        for (const auto& [declaration, points_to] : other.pointers) {
-            changed = pointers[declaration].join(points_to) || changed;
+        std::unordered_set<const clang::ValueDecl*> pointer_declarations;
+        for (const auto& [declaration, unused] : pointers) {
+            (void)unused;
+            pointer_declarations.insert(declaration);
+        }
+        for (const auto& [declaration, unused] : other.pointers) {
+            (void)unused;
+            pointer_declarations.insert(declaration);
+        }
+
+        for (const clang::ValueDecl* declaration : pointer_declarations) {
+            const PointsTo old = pointer(declaration);
+            PointsTo merged = old;
+            merged.join(other.pointer(declaration));
+            changed = changed || merged != old;
+            pointers[declaration] = std::move(merged);
         }
         return changed;
     }
@@ -96,6 +116,7 @@ struct Evaluation {
     Origin origin = Origin::No;
     PointsTo pointer;
     std::unordered_set<const clang::ValueDecl*> locations;
+    bool unknown_location = false;
 };
 
 Origin read_origin(
@@ -191,6 +212,7 @@ class Evaluator final {
         if (const auto* cast = llvm::dyn_cast<clang::CastExpr>(expression)) {
             Evaluation result = evaluate(cast->getSubExpr());
             result.locations.clear();
+            result.unknown_location = false;
             return result;
         }
 
@@ -218,18 +240,20 @@ class Evaluator final {
                     .origin = Origin::No,
                     .pointer = {
                         .targets = std::move(operand.locations),
-                        .unknown = false,
+                        .unknown = operand.unknown_location,
                     },
                     .locations = {},
+                    .unknown_location = false,
                 };
             case clang::UO_Deref: {
                 Evaluation result;
                 result.locations = operand.pointer.targets;
-                result.origin = operand.pointer.unknown
+                result.unknown_location = operand.pointer.unknown;
+                result.origin = result.unknown_location
                                     ? Origin::Maybe
                                     : read_origin(state_, result.locations);
                 result.pointer = read_pointer(state_, result.locations);
-                result.pointer.unknown = result.pointer.unknown || operand.pointer.unknown;
+                result.pointer.unknown = result.pointer.unknown || result.unknown_location;
                 return result;
             }
             case clang::UO_PreInc:
@@ -237,7 +261,7 @@ class Evaluator final {
             case clang::UO_PostInc:
             case clang::UO_PostDec:
                 for (const clang::ValueDecl* location : operand.locations) {
-                    state_.values[location] = Origin::No;
+                    state_.values.erase(location);
                 }
                 return {};
             default:
@@ -256,6 +280,7 @@ class Evaluator final {
                 Evaluation rhs = evaluate(binary->getRHS());
                 write(lhs.locations, rhs);
                 rhs.locations.clear();
+                rhs.unknown_location = false;
                 return rhs;
             }
 
@@ -289,6 +314,8 @@ class Evaluator final {
             result.locations.insert(
                 false_result.locations.begin(),
                 false_result.locations.end());
+            result.unknown_location =
+                true_result.unknown_location || false_result.unknown_location;
             return result;
         }
 
@@ -308,14 +335,20 @@ class Evaluator final {
     }
 
     void write(const clang::ValueDecl& declaration, const Evaluation& value) {
-        write({&declaration}, value);
+        const std::unordered_set<const clang::ValueDecl*> locations = {&declaration};
+        write(locations, value);
     }
 
     void write(
         const std::unordered_set<const clang::ValueDecl*>& locations,
         const Evaluation& value) {
         for (const clang::ValueDecl* location : locations) {
-            state_.values[location] = value.origin;
+            if (value.origin == Origin::No) {
+                state_.values.erase(location);
+            } else {
+                state_.values[location] = value.origin;
+            }
+
             if (location->getType()->isPointerType()) {
                 state_.pointers[location] = value.pointer;
             } else {
@@ -406,8 +439,7 @@ ExpressionSet CFGValueFlow::aliases_for(const clang::CallExpr& call) const {
             }
 
             State merged = *input;
-            merged.join(output);
-            if (merged != *input) {
+            if (merged.join(output)) {
                 input = std::move(merged);
                 worklist.push_back(successor);
             }
