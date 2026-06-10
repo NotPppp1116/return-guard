@@ -14,11 +14,7 @@ namespace {
 
 bool function_is_no_return(const clang::FunctionDecl* function) {
     return function != nullptr &&
-           (function->isNoReturn() || function->hasAttr<clang::AnalyzerNoReturnAttr>() ||
-            function->hasAttr<clang::C11NoReturnAttr>() ||
-            function->hasAttr<clang::CXX11NoReturnAttr>() ||
-            function->hasAttr<clang::InferredNoReturnAttr>() ||
-            function->hasAttr<clang::NoReturnAttr>());
+           (function->isNoReturn() || function->hasAttr<clang::AnalyzerNoReturnAttr>());
 }
 
 } // namespace

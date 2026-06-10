@@ -7,24 +7,34 @@ on:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        llvm-version: [18]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang llvm-dev libclang-dev cmake ninja-build
+          sudo apt-get install -y -qq \
+            clang-${{ matrix.llvm-version }} \
+            llvm-${{ matrix.llvm-version }}-dev \
+            libclang-${{ matrix.llvm-version }}-dev \
+            cmake \
+            ninja-build
 
       - name: Configure
         run: |
-          LLVM_CMAKE_DIR="$(llvm-config --cmakedir)"
+          LLVM_CMAKE_DIR="$(llvm-config-${{ matrix.llvm-version }} --cmakedir)"
           CLANG_CMAKE_DIR="$(dirname "${LLVM_CMAKE_DIR}")/clang"
 
           cmake -S . -B build -G Ninja \
-            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_CXX_COMPILER=clang++-${{ matrix.llvm-version }} \
             -DLLVM_DIR="${LLVM_CMAKE_DIR}" \
-            -DClang_DIR="${CLANG_CMAKE_DIR}"
+            -DClang_DIR="${CLANG_CMAKE_DIR}" \
+            -DRETURNGUARD_WARNINGS_AS_ERRORS=ON
 
       - name: Build
         run: cmake --build build
@@ -34,7 +44,7 @@ jobs:
 
       - name: Upload failing CTest log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ctest-last-log
           path: build/Testing/Temporary/LastTest.log

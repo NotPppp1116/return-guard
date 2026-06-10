@@ -5,9 +5,11 @@
 #define RG_VALUES(...) \
     __attribute__((annotate("returnguard.values:" #__VA_ARGS__)))
 #define RG_NORETURN __attribute__((noreturn))
+#define RG_ANALYZER_NORETURN __attribute__((analyzer_noreturn))
 #else
 #define RG_VALUES(...)
 #define RG_NORETURN
+#define RG_ANALYZER_NORETURN
 #endif
 
 enum status_code {
@@ -20,6 +22,7 @@ enum status_code enum_status(int selector);
 RG_VALUES(1, 4, 32) int annotated_status(void);
 int open_status(int selector);
 RG_NORETURN void fatal_status(int status);
+RG_ANALYZER_NORETURN void analyzer_fatal_status(int status);
 void log_status(int status);
 
 #endif
