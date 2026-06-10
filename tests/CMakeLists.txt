@@ -22,7 +22,7 @@ add_returnguard_test(
     --expect "int status = CALL_STATUS();"
     --reject "status_api.h:")
 add_returnguard_test(returnguard.enums enums.c practical 1 "missing STATUS_DENIED")
-add_returnguard_test(returnguard.integers integers.c strict 1 "checks do not have a final else/default")
+add_returnguard_test(returnguard.integers integers.c strict 1 "conditional checks through an alias have no final else")
 add_returnguard_test(returnguard.if_chains if_chains.c practical 1 "missing 32")
 add_returnguard_test(returnguard.direct_if direct_if.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.loop_conditions loop_conditions.c practical 2 "missing 32")
