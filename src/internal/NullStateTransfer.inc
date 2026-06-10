@@ -207,7 +207,7 @@ class Transfer final {
         if (llvm::isa<clang::DeclRefExpr>(expression)) {
             return;
         }
-        if (expression->getType() != nullptr && expression->getType()->isPointerType()) {
+        if (!expression->getType().isNull() && expression->getType()->isPointerType()) {
             state_.set_expr(expression, value);
         }
         evaluate(expression);
