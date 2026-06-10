@@ -3,6 +3,7 @@
 #include "AstUtils.hpp"
 #include "CFGValueFlow.hpp"
 #include "DomainUtils.hpp"
+#include "HandlerFinder.hpp"
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
@@ -123,9 +124,9 @@ class ResultAccumulator final {
 
 class FlowHandlingFinder final : public clang::RecursiveASTVisitor<FlowHandlingFinder> {
   public:
-    FlowHandlingFinder(Analyzer& analyzer, const clang::CallExpr& call,
+    FlowHandlingFinder(Analyzer& analyzer, clang::SourceLocation after,
                        const ExpressionSet& aliases, const Domain& domain)
-        : analyzer_(analyzer), call_(call), aliases_(aliases), domain_(domain),
+        : analyzer_(analyzer), after_(after), aliases_(aliases), domain_(domain),
           accumulator_(domain) {}
 
     bool VisitSwitchStmt(clang::SwitchStmt* statement) {
@@ -213,7 +214,7 @@ class FlowHandlingFinder final : public clang::RecursiveASTVisitor<FlowHandlingF
     [[nodiscard]] bool occurs_after(clang::SourceLocation location) const {
         const clang::SourceManager& manager = analyzer_.source_manager();
         location = manager.getFileLoc(location);
-        const clang::SourceLocation after = manager.getFileLoc(call_.getEndLoc());
+        const clang::SourceLocation after = manager.getFileLoc(after_);
         if (location.isInvalid() || after.isInvalid() ||
             manager.getFileID(location) != manager.getFileID(after)) {
             return false;
@@ -222,7 +223,7 @@ class FlowHandlingFinder final : public clang::RecursiveASTVisitor<FlowHandlingF
     }
 
     Analyzer& analyzer_;
-    const clang::CallExpr& call_;
+    clang::SourceLocation after_;
     const ExpressionSet& aliases_;
     const Domain& domain_;
     ResultAccumulator accumulator_;
@@ -264,9 +265,59 @@ std::optional<CheckResult> Analyzer::analyze_flow_aliases(const clang::CallExpr*
         return std::nullopt;
     }
 
-    FlowHandlingFinder finder(*this, *call, aliases, domain);
+    FlowHandlingFinder finder(*this, call->getEndLoc(), aliases, domain);
     finder.TraverseStmt(const_cast<clang::Stmt*>(function->getBody()));
     return finder.result();
+}
+
+bool Analyzer::function_checks_parameter(const clang::FunctionDecl* function, unsigned param_index,
+                                         const Domain& domain) const {
+    if (function == nullptr) {
+        return false;
+    }
+    const clang::FunctionDecl* canonical = function->getCanonicalDecl();
+
+    auto target = std::make_pair(canonical, param_index);
+    if (std::find(active_parameter_checks_.begin(), active_parameter_checks_.end(), target) !=
+        active_parameter_checks_.end()) {
+        return false;
+    }
+    active_parameter_checks_.push_back(target);
+
+    const auto cleanup = [&]() {
+        active_parameter_checks_.erase(
+            std::remove(active_parameter_checks_.begin(), active_parameter_checks_.end(), target),
+            active_parameter_checks_.end());
+    };
+
+    const clang::FunctionDecl* definition = nullptr;
+    if (!canonical->hasBody(definition) || definition == nullptr ||
+        param_index >= definition->getNumParams()) {
+        cleanup();
+        return false;
+    }
+
+    const clang::ParmVarDecl* param = definition->getParamDecl(param_index);
+    CFGValueFlow* flow = const_cast<Analyzer*>(this)->value_flow(definition);
+    if (flow != nullptr) {
+        const ExpressionSet aliases = flow->aliases_for(*param);
+        if (!aliases.empty()) {
+            FlowHandlingFinder finder(const_cast<Analyzer&>(*this),
+                                      definition->getBody()->getBeginLoc(), aliases, domain);
+            finder.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
+            const std::optional<CheckResult> result = finder.result();
+            cleanup();
+            return result.has_value() && result->kind == HandlingKind::ExhaustivelyChecked;
+        }
+        cleanup();
+        return false;
+    }
+
+    HandlerFinder finder(const_cast<Analyzer&>(*this), param, definition->getBody()->getBeginLoc(),
+                         domain);
+    finder.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
+    cleanup();
+    return finder.exhaustive();
 }
 
 } // namespace returnguard::internal

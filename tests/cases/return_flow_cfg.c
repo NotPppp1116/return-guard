@@ -6,6 +6,13 @@ static void exhaustive_status_helper(int status) {
     }
 }
 
+static void unreachable_status_helper(int status) {
+    return;
+    if (status == 1 || status == 4 || status == 32) {
+        return;
+    }
+}
+
 void checked_after_join(int selector) {
     int status = annotated_status();
     int alias;
@@ -22,6 +29,11 @@ void checked_after_join(int selector) {
 void checked_by_helper(void) {
     int status = annotated_status();
     exhaustive_status_helper(status);
+}
+
+void helper_with_unreachable_check_does_not_count(void) {
+    int status = annotated_status();
+    unreachable_status_helper(status);
 }
 
 void unreachable_check_does_not_count(void) {

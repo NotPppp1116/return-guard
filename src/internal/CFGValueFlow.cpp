@@ -26,9 +26,7 @@ enum class Origin {
     Maybe,
 };
 
-Origin join_origin(Origin lhs, Origin rhs) {
-    return lhs == rhs ? lhs : Origin::Maybe;
-}
+Origin join_origin(Origin lhs, Origin rhs) { return lhs == rhs ? lhs : Origin::Maybe; }
 
 struct PointsTo {
     std::unordered_set<const clang::ValueDecl*> targets;
@@ -119,21 +117,18 @@ struct Evaluation {
     bool unknown_location = false;
 };
 
-Origin read_origin(
-    const State& state,
-    const std::unordered_set<const clang::ValueDecl*>& locations) {
+Origin read_origin(const State& state,
+                   const std::unordered_set<const clang::ValueDecl*>& locations) {
     std::optional<Origin> result;
     for (const clang::ValueDecl* location : locations) {
-        result = result.has_value()
-                     ? join_origin(*result, state.value(location))
-                     : state.value(location);
+        result = result.has_value() ? join_origin(*result, state.value(location))
+                                    : state.value(location);
     }
     return result.value_or(Origin::No);
 }
 
-PointsTo read_pointer(
-    const State& state,
-    const std::unordered_set<const clang::ValueDecl*>& locations) {
+PointsTo read_pointer(const State& state,
+                      const std::unordered_set<const clang::ValueDecl*>& locations) {
     PointsTo result;
     for (const clang::ValueDecl* location : locations) {
         result.join(state.pointer(location));
@@ -143,10 +138,7 @@ PointsTo read_pointer(
 
 class Evaluator final {
   public:
-    Evaluator(
-        State& state,
-        const clang::CallExpr& target,
-        ExpressionSet* aliases)
+    Evaluator(State& state, const clang::CallExpr* target, ExpressionSet* aliases)
         : state_(state), target_(target), aliases_(aliases) {}
 
     Evaluation evaluate(const clang::Expr* expression) {
@@ -168,8 +160,7 @@ class Evaluator final {
             return;
         }
 
-        if (const auto* declaration_statement =
-                llvm::dyn_cast<clang::DeclStmt>(statement)) {
+        if (const auto* declaration_statement = llvm::dyn_cast<clang::DeclStmt>(statement)) {
             for (const clang::Decl* declaration : declaration_statement->decls()) {
                 const auto* variable = llvm::dyn_cast<clang::VarDecl>(declaration);
                 if (variable == nullptr || variable->getInit() == nullptr) {
@@ -181,8 +172,7 @@ class Evaluator final {
             return;
         }
 
-        if (const auto* return_statement =
-                llvm::dyn_cast<clang::ReturnStmt>(statement)) {
+        if (const auto* return_statement = llvm::dyn_cast<clang::ReturnStmt>(statement)) {
             evaluate(return_statement->getRetValue());
             return;
         }
@@ -194,8 +184,8 @@ class Evaluator final {
 
   private:
     Evaluation evaluate_impl(const clang::Expr* expression) {
-        if (expression == &target_) {
-            for (const clang::Expr* argument : target_.arguments()) {
+        if (target_ != nullptr && expression == target_) {
+            for (const clang::Expr* argument : target_->arguments()) {
                 evaluate(argument);
             }
             Evaluation result;
@@ -240,10 +230,11 @@ class Evaluator final {
             case clang::UO_AddrOf:
                 return {
                     .origin = Origin::No,
-                    .pointer = {
-                        .targets = std::move(operand.locations),
-                        .unknown = operand.unknown_location,
-                    },
+                    .pointer =
+                        {
+                            .targets = std::move(operand.locations),
+                            .unknown = operand.unknown_location,
+                        },
                     .locations = {},
                     .unknown_location = false,
                 };
@@ -251,9 +242,8 @@ class Evaluator final {
                 Evaluation result;
                 result.locations = operand.pointer.targets;
                 result.unknown_location = operand.pointer.unknown;
-                result.origin = result.unknown_location
-                                    ? Origin::Maybe
-                                    : read_origin(state_, result.locations);
+                result.origin =
+                    result.unknown_location ? Origin::Maybe : read_origin(state_, result.locations);
                 result.pointer = read_pointer(state_, result.locations);
                 result.pointer.unknown = result.pointer.unknown || result.unknown_location;
                 return result;
@@ -291,8 +281,7 @@ class Evaluator final {
             return {};
         }
 
-        if (const auto* conditional =
-                llvm::dyn_cast<clang::ConditionalOperator>(expression)) {
+        if (const auto* conditional = llvm::dyn_cast<clang::ConditionalOperator>(expression)) {
             evaluate(conditional->getCond());
 
             State true_state = state_;
@@ -310,14 +299,9 @@ class Evaluator final {
             result.origin = join_origin(true_result.origin, false_result.origin);
             result.pointer = std::move(true_result.pointer);
             result.pointer.join(false_result.pointer);
-            result.locations.insert(
-                true_result.locations.begin(),
-                true_result.locations.end());
-            result.locations.insert(
-                false_result.locations.begin(),
-                false_result.locations.end());
-            result.unknown_location =
-                true_result.unknown_location || false_result.unknown_location;
+            result.locations.insert(true_result.locations.begin(), true_result.locations.end());
+            result.locations.insert(false_result.locations.begin(), false_result.locations.end());
+            result.unknown_location = true_result.unknown_location || false_result.unknown_location;
             return result;
         }
 
@@ -341,9 +325,8 @@ class Evaluator final {
         write(locations, value);
     }
 
-    void write(
-        const std::unordered_set<const clang::ValueDecl*>& locations,
-        const Evaluation& value) {
+    void write(const std::unordered_set<const clang::ValueDecl*>& locations,
+               const Evaluation& value) {
         for (const clang::ValueDecl* location : locations) {
             if (value.origin == Origin::No) {
                 state_.values.erase(location);
@@ -360,15 +343,12 @@ class Evaluator final {
     }
 
     State& state_;
-    const clang::CallExpr& target_;
+    const clang::CallExpr* target_;
     ExpressionSet* aliases_;
 };
 
-void transfer_block(
-    const clang::CFGBlock& block,
-    State& state,
-    const clang::CallExpr& target,
-    ExpressionSet* aliases) {
+void transfer_block(const clang::CFGBlock& block, State& state, const clang::CallExpr* target,
+                    ExpressionSet* aliases) {
     Evaluator evaluator(state, target, aliases);
     for (const clang::CFGElement& element : block) {
         if (const auto statement = element.getAs<clang::CFGStmt>()) {
@@ -386,14 +366,11 @@ void transfer_block(
 
 } // namespace
 
-CFGValueFlow::CFGValueFlow(
-    std::unique_ptr<clang::CFG> cfg,
-    clang::ASTContext& context)
+CFGValueFlow::CFGValueFlow(std::unique_ptr<clang::CFG> cfg, clang::ASTContext& context)
     : cfg_(std::move(cfg)), context_(context) {}
 
-std::unique_ptr<CFGValueFlow> CFGValueFlow::build(
-    const clang::FunctionDecl& function,
-    clang::ASTContext& context) {
+std::unique_ptr<CFGValueFlow> CFGValueFlow::build(const clang::FunctionDecl& function,
+                                                  clang::ASTContext& context) {
     if (!function.doesThisDeclarationHaveABody()) {
         return nullptr;
     }
@@ -402,16 +379,12 @@ std::unique_ptr<CFGValueFlow> CFGValueFlow::build(
     options.PruneTriviallyFalseEdges = true;
     options.AddInitializers = true;
 
-    std::unique_ptr<clang::CFG> cfg = clang::CFG::buildCFG(
-        &function,
-        function.getBody(),
-        &context,
-        options);
+    std::unique_ptr<clang::CFG> cfg =
+        clang::CFG::buildCFG(&function, function.getBody(), &context, options);
     if (!cfg) {
         return nullptr;
     }
-    return std::unique_ptr<CFGValueFlow>(
-        new CFGValueFlow(std::move(cfg), context));
+    return std::unique_ptr<CFGValueFlow>(new CFGValueFlow(std::move(cfg), context));
 }
 
 ExpressionSet CFGValueFlow::aliases_for(const clang::CallExpr& call) const {
@@ -429,7 +402,7 @@ ExpressionSet CFGValueFlow::aliases_for(const clang::CallExpr& call) const {
         worklist.pop_front();
 
         State output = *inputs[block->getBlockID()];
-        transfer_block(*block, output, call, nullptr);
+        transfer_block(*block, output, &call, nullptr);
 
         for (const clang::CFGBlock* successor : block->succs()) {
             if (successor == nullptr) {
@@ -457,9 +430,60 @@ ExpressionSet CFGValueFlow::aliases_for(const clang::CallExpr& call) const {
             continue;
         }
         State state = *inputs[block->getBlockID()];
-        transfer_block(*block, state, call, &aliases);
+        transfer_block(*block, state, &call, &aliases);
     }
     aliases.erase(strip_expr(&call));
+    return aliases;
+}
+
+ExpressionSet CFGValueFlow::aliases_for(const clang::ValueDecl& declaration) const {
+    (void)context_;
+    const unsigned block_count = cfg_->getNumBlockIDs();
+    std::vector<std::optional<State>> inputs(block_count);
+    std::deque<const clang::CFGBlock*> worklist;
+
+    State entry_state;
+    entry_state.values[&declaration] = Origin::Yes;
+
+    const clang::CFGBlock& entry = cfg_->getEntry();
+    inputs[entry.getBlockID()] = std::move(entry_state);
+    worklist.push_back(&entry);
+
+    while (!worklist.empty()) {
+        const clang::CFGBlock* block = worklist.front();
+        worklist.pop_front();
+
+        State output = *inputs[block->getBlockID()];
+        transfer_block(*block, output, nullptr, nullptr);
+
+        for (const clang::CFGBlock* successor : block->succs()) {
+            if (successor == nullptr) {
+                continue;
+            }
+
+            std::optional<State>& input = inputs[successor->getBlockID()];
+            if (!input.has_value()) {
+                input = output;
+                worklist.push_back(successor);
+                continue;
+            }
+
+            State merged = *input;
+            if (merged.join(output)) {
+                input = std::move(merged);
+                worklist.push_back(successor);
+            }
+        }
+    }
+
+    ExpressionSet aliases;
+    for (const clang::CFGBlock* block : *cfg_) {
+        if (block == nullptr || !inputs[block->getBlockID()].has_value()) {
+            continue;
+        }
+        State state = *inputs[block->getBlockID()];
+        transfer_block(*block, state, nullptr, &aliases);
+    }
     return aliases;
 }
 
