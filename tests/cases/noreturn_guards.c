@@ -32,6 +32,13 @@ void noreturn_guard_with_unreachable_tail(void) {
     }
 }
 
+void analyzer_noreturn_guard(void) {
+    int status = annotated_status();
+    if (status != 1) {
+        analyzer_fatal_status(status);
+    }
+}
+
 void ordinary_handler_does_not_exit(void) {
     if (annotated_status() != 1) {
         log_status(1);
