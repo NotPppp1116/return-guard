@@ -63,7 +63,7 @@ add_executable(returnguard
     src/CompilationSetup.cpp
     src/Options.cpp
     src/Frontend.cpp
-    src/internal/AnalyzerInstrumentation.cpp
+    src/internal/Analyzer.cpp
     src/internal/AnalyzerCalls.cpp
     src/internal/AnalyzerControlFlow.cpp
     src/internal/AnalyzerDiagnostics.cpp
@@ -80,7 +80,7 @@ add_executable(returnguard
     src/internal/DomainUtils.cpp
     src/internal/HandlerFinder.cpp
     src/internal/IfChain.cpp
-    src/internal/InstrumentationFixed.cpp
+    src/internal/Instrumentation.cpp
     src/internal/NullStateAnalysis.cpp
     src/internal/ReturnCollector.cpp
     src/internal/ValueSetInference.cpp
