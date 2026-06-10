@@ -33,6 +33,7 @@ class HandlerFinder final : public clang::RecursiveASTVisitor<HandlerFinder> {
                   const Domain& domain);
 
     bool VisitSwitchStmt(clang::SwitchStmt* statement);
+    bool VisitCallExpr(clang::CallExpr* call);
     bool VisitIfStmt(clang::IfStmt* statement);
     bool VisitWhileStmt(clang::WhileStmt* statement);
     bool VisitDoStmt(clang::DoStmt* statement);

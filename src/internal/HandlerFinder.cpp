@@ -337,4 +337,28 @@ bool HandlerFinder::VisitDeclRefExpr(clang::DeclRefExpr* reference) {
     return true;
 }
 
+bool HandlerFinder::VisitCallExpr(clang::CallExpr* call) {
+    if (invalidated_ || !occurs_after(call->getBeginLoc())) {
+        return true;
+    }
+
+    const clang::FunctionDecl* callee = call->getDirectCallee();
+    if (callee == nullptr) {
+        return true;
+    }
+
+    for (unsigned index = 0; index < call->getNumArgs(); ++index) {
+        const clang::Expr* arg = call->getArg(index);
+        if (const clang::VarDecl* variable = forwarded_tracked_variable(arg)) {
+            if (analyzer_.function_checks_parameter(callee, index, domain_)) {
+                exhaustive_ = true;
+                std::fill(covered_.begin(), covered_.end(), true);
+                remove_tracked_variable(variable);
+                break;
+            }
+        }
+    }
+    return true;
+}
+
 } // namespace returnguard::internal

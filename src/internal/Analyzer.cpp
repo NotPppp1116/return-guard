@@ -28,6 +28,13 @@ bool Analyzer::VisitCallExpr(clang::CallExpr* call) {
     return true;
 }
 
+bool Analyzer::VisitFunctionDecl(clang::FunctionDecl* function) {
+    if (function != nullptr && function->hasBody()) {
+        analyze_safety(function);
+    }
+    return true;
+}
+
 const clang::ASTContext& Analyzer::context() const {
     return context_;
 }

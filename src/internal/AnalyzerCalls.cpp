@@ -252,4 +252,38 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
     emit(call, message.str(), note);
 }
 
+bool Analyzer::function_checks_parameter(
+    const clang::FunctionDecl* function,
+    unsigned param_index,
+    const Domain& domain) const {
+    if (function == nullptr) {
+        return false;
+    }
+    const clang::FunctionDecl* canonical = function->getCanonicalDecl();
+
+    auto target = std::make_pair(canonical, param_index);
+    if (std::find(active_parameter_checks_.begin(), active_parameter_checks_.end(), target) !=
+        active_parameter_checks_.end()) {
+        return false;
+    }
+    active_parameter_checks_.push_back(target);
+
+    const clang::FunctionDecl* definition = nullptr;
+    if (canonical->hasBody(definition) && definition != nullptr && param_index < definition->getNumParams()) {
+        const clang::ParmVarDecl* param = definition->getParamDecl(param_index);
+        HandlerFinder finder(const_cast<Analyzer&>(*this), param, definition->getBody()->getBeginLoc(), domain);
+        finder.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
+
+        active_parameter_checks_.erase(
+            std::remove(active_parameter_checks_.begin(), active_parameter_checks_.end(), target),
+            active_parameter_checks_.end());
+        return finder.exhaustive();
+    }
+
+    active_parameter_checks_.erase(
+        std::remove(active_parameter_checks_.begin(), active_parameter_checks_.end(), target),
+        active_parameter_checks_.end());
+    return false;
+}
+
 } // namespace returnguard::internal

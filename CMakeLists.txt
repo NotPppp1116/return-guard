@@ -84,6 +84,7 @@ add_executable(returnguard
     src/internal/AnalyzerFlowControl.cpp
     src/internal/AnalyzerNullState.cpp
     src/internal/AnalyzerParents.cpp
+    src/internal/AnalyzerSafety.cpp
     src/internal/AnalyzerSource.cpp
     src/internal/AstUtils.cpp
     src/internal/CFGValueFlow.cpp
