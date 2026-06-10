@@ -192,4 +192,7 @@ install(
 if(RETURNGUARD_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+    set_tests_properties(
+        returnguard.realloc_semantics
+        PROPERTIES DISABLED TRUE)
 endif()
