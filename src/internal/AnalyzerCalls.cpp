@@ -7,15 +7,18 @@
 #include <returnguard/Options.hpp>
 
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/Attr.h>
 #include <clang/AST/Decl.h>
+#include <clang/AST/DeclCXX.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
+#include <clang/AST/Type.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <algorithm>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace returnguard::internal {
@@ -27,12 +30,18 @@ CheckResult exhaustive_result() {
     return result;
 }
 
-bool is_commonly_ignored_system_function(llvm::StringRef name) {
-    static const std::unordered_set<std::string> ignored_names = {
-        "printf",    "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf", "vsprintf",
-        "vsnprintf", "memcpy",  "memmove", "memset",   "strcpy",  "strncpy",  "strcat",
-        "strncat",   "putchar", "putc",    "puts",     "fwrite"};
-    return ignored_names.contains(name.str());
+bool declaration_requires_a_used_result(const clang::FunctionDecl& function) {
+    for (const clang::FunctionDecl* redeclaration : function.redecls()) {
+        if (redeclaration->hasAttr<clang::WarnUnusedResultAttr>()) {
+            return true;
+        }
+    }
+
+    const clang::QualType return_type = function.getReturnType();
+    if (const auto* record = return_type->getAsCXXRecordDecl()) {
+        return record->hasAttr<clang::WarnUnusedResultAttr>();
+    }
+    return false;
 }
 
 } // namespace
@@ -193,13 +202,6 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
         return;
     }
 
-    if (const clang::FunctionDecl* callee = call->getDirectCallee()) {
-        if (source_manager_.isInSystemHeader(callee->getLocation()) &&
-            is_commonly_ignored_system_function(callee->getName())) {
-            return;
-        }
-    }
-
     if (!returnguard::options().include_operators && call_is_operator(call)) {
         return;
     }
@@ -215,6 +217,19 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
 
     const Domain domain = call_domain(call);
     const CheckResult result = classify_call(call, domain);
+
+    // In practical policies, defer to Clang's declaration-level contract for
+    // discarded calls from system headers. Unlike the old name allowlist, this
+    // still analyzes stored/checked results and honors [[nodiscard]] and
+    // warn_unused_result on any API.
+    if (result.kind == HandlingKind::Ignored && returnguard::options().mode != Mode::Strict) {
+        if (const clang::FunctionDecl* callee = call->getDirectCallee();
+            callee != nullptr && source_manager_.isInSystemHeader(callee->getLocation()) &&
+            !declaration_requires_a_used_result(*callee)) {
+            return;
+        }
+    }
+
     if (!should_report(result, domain)) {
         return;
     }
@@ -269,9 +284,11 @@ bool Analyzer::function_checks_parameter(
     active_parameter_checks_.push_back(target);
 
     const clang::FunctionDecl* definition = nullptr;
-    if (canonical->hasBody(definition) && definition != nullptr && param_index < definition->getNumParams()) {
+    if (canonical->hasBody(definition) && definition != nullptr &&
+        param_index < definition->getNumParams()) {
         const clang::ParmVarDecl* param = definition->getParamDecl(param_index);
-        HandlerFinder finder(const_cast<Analyzer&>(*this), param, definition->getBody()->getBeginLoc(), domain);
+        HandlerFinder finder(const_cast<Analyzer&>(*this), param,
+                             definition->getBody()->getBeginLoc(), domain);
         finder.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
 
         active_parameter_checks_.erase(
