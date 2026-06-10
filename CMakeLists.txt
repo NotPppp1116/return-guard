@@ -80,7 +80,7 @@ add_executable(returnguard
     src/internal/DomainUtils.cpp
     src/internal/HandlerFinder.cpp
     src/internal/IfChain.cpp
-    src/internal/Instrumentation.cpp
+    src/internal/InstrumentationFixed.cpp
     src/internal/NullStateAnalysis.cpp
     src/internal/ReturnCollector.cpp
     src/internal/ValueSetInference.cpp
