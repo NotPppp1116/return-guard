@@ -44,7 +44,7 @@ NullStateAnalysis::unsafe_dereferences_for(const clang::CallExpr& call) const {
         worklist.pop_front();
 
         State output = *inputs[block->getBlockID()];
-        transfer_block(*block, output, source, nullptr);
+        transfer_block(*block, output, source, nullptr, context_);
 
         unsigned successor_index = 0U;
         for (const clang::CFGBlock* successor : block->succs()) {
@@ -77,7 +77,7 @@ NullStateAnalysis::unsafe_dereferences_for(const clang::CallExpr& call) const {
             continue;
         }
         State state = *inputs[block->getBlockID()];
-        transfer_block(*block, state, source, &unsafe);
+        transfer_block(*block, state, source, &unsafe, context_);
     }
 
     std::vector<const clang::Expr*> result(unsafe.begin(), unsafe.end());
@@ -122,7 +122,7 @@ bool NullStateAnalysis::is_source_nullable_at(
         worklist.pop_front();
 
         State output = *inputs[block->getBlockID()];
-        transfer_block(*block, output, source, nullptr);
+        transfer_block(*block, output, source, nullptr, context_);
 
         unsigned successor_index = 0U;
         for (const clang::CFGBlock* successor : block->succs()) {
@@ -158,7 +158,7 @@ bool NullStateAnalysis::is_source_nullable_at(
             if (auto cfg_stmt = element.getAs<clang::CFGStmt>()) {
                 if (cfg_stmt->getStmt() == stmt) {
                     State state = *inputs[block->getBlockID()];
-                    Transfer transfer(state, source, nullptr);
+                    Transfer transfer(state, source, nullptr, context_);
                     for (const clang::CFGElement& inner_element : *block) {
                         if (auto inner_cfg_stmt = inner_element.getAs<clang::CFGStmt>()) {
                             if (inner_cfg_stmt->getStmt() == stmt) {
@@ -176,4 +176,3 @@ bool NullStateAnalysis::is_source_nullable_at(
 
     return false;
 }
-

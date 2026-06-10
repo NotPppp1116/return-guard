@@ -5,8 +5,8 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Expr.h>
 #include <llvm/ADT/APSInt.h>
-
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace returnguard::internal {

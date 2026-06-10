@@ -21,8 +21,7 @@ ValueSetInference::ValueSetInference(Analyzer& analyzer)
     : analyzer_(analyzer), context_(analyzer.context()) {}
 
 std::optional<Domain> ValueSetInference::infer_expression(
-    const clang::Expr* expression,
-    std::unordered_set<const clang::FunctionDecl*>& active_functions,
+    const clang::Expr* expression, std::unordered_set<const clang::FunctionDecl*>& active_functions,
     std::unordered_set<const clang::VarDecl*>& active_variables) {
     expression = strip_expr(expression);
     if (expression == nullptr) {
@@ -84,16 +83,16 @@ std::optional<Domain> ValueSetInference::infer_expression(
     return std::nullopt;
 }
 
-std::optional<Domain> ValueSetInference::infer_binary(
-    const clang::BinaryOperator* binary,
-    std::unordered_set<const clang::FunctionDecl*>& active_functions,
-    std::unordered_set<const clang::VarDecl*>& active_variables) {
+std::optional<Domain>
+ValueSetInference::infer_binary(const clang::BinaryOperator* binary,
+                                std::unordered_set<const clang::FunctionDecl*>& active_functions,
+                                std::unordered_set<const clang::VarDecl*>& active_variables) {
     if (binary->getOpcode() == clang::BO_Comma) {
         return infer_expression(binary->getRHS(), active_functions, active_variables);
     }
 
-    if (!binary->isAdditiveOp() && !binary->isMultiplicativeOp() &&
-        !binary->isBitwiseOp() && !binary->isShiftOp()) {
+    if (!binary->isAdditiveOp() && !binary->isMultiplicativeOp() && !binary->isBitwiseOp() &&
+        !binary->isShiftOp()) {
         return std::nullopt;
     }
 
@@ -113,36 +112,63 @@ std::optional<Domain> ValueSetInference::infer_binary(
         for (const auto& r : rhs->values) {
             llvm::APSInt val = l.value;
             switch (binary->getOpcode()) {
-            case clang::BO_Add: val += r.value; break;
-            case clang::BO_Sub: val -= r.value; break;
-            case clang::BO_Mul: val *= r.value; break;
+            case clang::BO_Add:
+                val += r.value;
+                break;
+            case clang::BO_Sub:
+                val -= r.value;
+                break;
+            case clang::BO_Mul:
+                val *= r.value;
+                break;
             case clang::BO_Div:
-                if (r.value == 0) return std::nullopt;
+                if (r.value == 0)
+                    return std::nullopt;
                 val /= r.value;
                 break;
             case clang::BO_Rem:
-                if (r.value == 0) return std::nullopt;
+                if (r.value == 0)
+                    return std::nullopt;
                 val %= r.value;
                 break;
-            case clang::BO_And: val &= r.value; break;
-            case clang::BO_Or: val |= r.value; break;
-            case clang::BO_Xor: val ^= r.value; break;
-            case clang::BO_Shl: val <<= static_cast<unsigned>(r.value.getExtValue()); break;
-            case clang::BO_Shr: val >>= static_cast<unsigned>(r.value.getExtValue()); break;
-            default: return std::nullopt;
+            case clang::BO_And:
+                val &= r.value;
+                break;
+            case clang::BO_Or:
+                val |= r.value;
+                break;
+            case clang::BO_Xor:
+                val ^= r.value;
+                break;
+            case clang::BO_Shl:
+            case clang::BO_Shr: {
+                int64_t shift = r.value.getExtValue();
+                if (shift < 0 || static_cast<uint64_t>(shift) >= val.getBitWidth()) {
+                    return std::nullopt;
+                }
+                if (binary->getOpcode() == clang::BO_Shl) {
+                    val <<= static_cast<unsigned>(shift);
+                } else {
+                    val >>= static_cast<unsigned>(shift);
+                }
+                break;
+            }
+            default:
+                return std::nullopt;
             }
             add_domain_value(result, val, "");
         }
     }
 
-    if (result.values.size() > 128) return std::nullopt; // Safety limit
+    if (result.values.size() > 128)
+        return std::nullopt; // Safety limit
     return result;
 }
 
-std::optional<Domain> ValueSetInference::infer_unary(
-    const clang::UnaryOperator* unary,
-    std::unordered_set<const clang::FunctionDecl*>& active_functions,
-    std::unordered_set<const clang::VarDecl*>& active_variables) {
+std::optional<Domain>
+ValueSetInference::infer_unary(const clang::UnaryOperator* unary,
+                               std::unordered_set<const clang::FunctionDecl*>& active_functions,
+                               std::unordered_set<const clang::VarDecl*>& active_variables) {
     auto sub = infer_expression(unary->getSubExpr(), active_functions, active_variables);
     if (!sub || !sub->finite) {
         return std::nullopt;
@@ -156,13 +182,19 @@ std::optional<Domain> ValueSetInference::infer_unary(
     for (const auto& s : sub->values) {
         llvm::APSInt val = s.value;
         switch (unary->getOpcode()) {
-        case clang::UO_Minus: val = -val; break;
-        case clang::UO_Plus: break;
-        case clang::UO_Not: val = ~val; break;
+        case clang::UO_Minus:
+            val = -val;
+            break;
+        case clang::UO_Plus:
+            break;
+        case clang::UO_Not:
+            val = ~val;
+            break;
         case clang::UO_LNot:
             val = llvm::APSInt(llvm::APInt(1U, val == 0 ? 1U : 0U), false);
             break;
-        default: return std::nullopt;
+        default:
+            return std::nullopt;
         }
         add_domain_value(result, val, "");
     }
@@ -172,7 +204,7 @@ std::optional<Domain> ValueSetInference::infer_unary(
 
 namespace {
 class SimpleAssignmentFinder : public clang::RecursiveASTVisitor<SimpleAssignmentFinder> {
-public:
+  public:
     SimpleAssignmentFinder(const clang::VarDecl* target) : target_(target) {}
     bool VisitBinaryOperator(clang::BinaryOperator* op) {
         if (op->isAssignmentOp() && referenced_variable(op->getLHS()) == target_) {
@@ -194,13 +226,12 @@ public:
     std::vector<const clang::Expr*> assignments_;
     const clang::VarDecl* target_;
 };
-}
+} // namespace
 
-std::optional<Domain> ValueSetInference::infer_variable(
-    const clang::VarDecl* variable,
-    const clang::Expr* reference_site,
-    std::unordered_set<const clang::FunctionDecl*>& active_functions,
-    std::unordered_set<const clang::VarDecl*>& active_variables) {
+std::optional<Domain>
+ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::Expr* reference_site,
+                                  std::unordered_set<const clang::FunctionDecl*>& active_functions,
+                                  std::unordered_set<const clang::VarDecl*>& active_variables) {
     if (llvm::isa<clang::ParmVarDecl>(variable)) {
         return std::nullopt;
     }
@@ -254,7 +285,8 @@ std::optional<Domain> ValueSetInference::infer_variable(
     }
 
     active_variables.erase(variable);
-    if (combined.finite) return combined;
+    if (combined.finite)
+        return combined;
     return std::nullopt;
 }
 

@@ -27,25 +27,47 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
         : function_(function), context_(context) {}
 
     bool VisitArraySubscriptExpr(clang::ArraySubscriptExpr* subscript) {
-        const clang::Expr* base = subscript->getBase()->IgnoreParenCasts();
-        const clang::Expr* idx = subscript->getIdx()->IgnoreParenCasts();
+        maybe_emit_oob_for_array(subscript->getBase(), subscript->getIdx(), subscript);
+        return true;
+    }
 
-        clang::QualType type = base->getType();
-        if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(base)) {
-            type = ref->getDecl()->getType();
-        }
+    bool VisitUnaryOperator(clang::UnaryOperator* unary) {
+        if (unary == nullptr)
+            return true;
 
-        if (type->isConstantArrayType()) {
-            const auto* array_type = llvm::dyn_cast<clang::ConstantArrayType>(type.getTypePtr());
-            llvm::APInt size = array_type->getSize();
-            auto index_opt = evaluate_integer(idx, context_);
-            if (index_opt.has_value()) {
-                if (index_opt->isNegative() ||
-                    llvm::APSInt::compareValues(*index_opt, llvm::APSInt(size, true)) >= 0) {
-                    emit_oob_warning(subscript, *index_opt, size);
+        // Handle pointer arithmetic patterns like "*(array + idx)"
+        if (unary->getOpcode() == clang::UO_Deref) {
+            const clang::Expr* sub = unary->getSubExpr()->IgnoreParenCasts();
+            if (const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(sub)) {
+                if (binary->getOpcode() == clang::BO_Add || binary->getOpcode() == clang::BO_Sub) {
+                    maybe_emit_oob_for_array(binary->getLHS(), binary->getRHS(), unary);
+                    maybe_emit_oob_for_array(binary->getRHS(), binary->getLHS(), unary);
                 }
             }
         }
+        return true;
+    }
+
+    bool VisitBinaryOperator(clang::BinaryOperator* binary) {
+        if (binary == nullptr)
+            return true;
+
+        // Detect obvious shift overflow: constant shift amount >= width of LHS
+        if (binary->getOpcode() == clang::BO_Shl || binary->getOpcode() == clang::BO_Shr) {
+            if (const clang::Expr* lhs = binary->getLHS()) {
+                if (const clang::Expr* rhs = binary->getRHS()) {
+                    auto rhs_val = evaluate_integer(rhs, context_);
+                    if (rhs_val.has_value()) {
+                        const unsigned long long shift_amount = rhs_val->getZExtValue();
+                        const unsigned long long width = context_.getTypeSize(lhs->getType());
+                        if (shift_amount >= width) {
+                            emit_shift_overflow_warning(binary, shift_amount, width);
+                        }
+                    }
+                }
+            }
+        }
+
         return true;
     }
 
@@ -294,6 +316,126 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
 
         diagnostics.Report(use_stmt->getBeginLoc(), diagnostic_id);
         diagnostics.Report(free_stmt->getBeginLoc(), note_id);
+    }
+
+    void emit_double_free_warning(const clang::Stmt* later_free, const clang::Stmt* earlier_free,
+                                  const clang::VarDecl* var) {
+        clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
+        const clang::DiagnosticsEngine::Level level = returnguard::options().fail_on_diagnostics
+                                                          ? clang::DiagnosticsEngine::Error
+                                                          : clang::DiagnosticsEngine::Warning;
+        const unsigned diagnostic_id = diagnostics.getCustomDiagID(
+            level, "returnguard safety: potential double free of pointer");
+        const unsigned note_id =
+            diagnostics.getCustomDiagID(clang::DiagnosticsEngine::Note,
+                                        "returnguard safety: pointer was freed here previously");
+
+        diagnostics.Report(later_free->getBeginLoc(), diagnostic_id);
+        diagnostics.Report(earlier_free->getBeginLoc(), note_id);
+    }
+
+    void emit_shift_overflow_warning(const clang::BinaryOperator* bin,
+                                     unsigned long long shift_amount, unsigned long long width) {
+        clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
+        const clang::DiagnosticsEngine::Level level = returnguard::options().fail_on_diagnostics
+                                                          ? clang::DiagnosticsEngine::Error
+                                                          : clang::DiagnosticsEngine::Warning;
+        const unsigned diagnostic_id = diagnostics.getCustomDiagID(
+            level, "returnguard safety: shift amount %0 is greater-or-equal to operand width %1");
+
+        diagnostics.Report(bin->getOperatorLoc(), diagnostic_id)
+            << std::to_string(shift_amount) << std::to_string(width);
+    }
+
+    void emit_oob_warning_at(const clang::Expr* expr, const llvm::APSInt& index,
+                             const llvm::APInt& size) {
+        if (expr == nullptr)
+            return;
+        clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
+        const clang::DiagnosticsEngine::Level level = returnguard::options().fail_on_diagnostics
+                                                          ? clang::DiagnosticsEngine::Error
+                                                          : clang::DiagnosticsEngine::Warning;
+        const unsigned diagnostic_id = diagnostics.getCustomDiagID(
+            level, "returnguard safety: array index %0 is out of bounds (array size is %1)");
+
+        diagnostics.Report(expr->getBeginLoc(), diagnostic_id)
+            << llvm::toString(index, 10, index.isSigned()) << llvm::toString(size, 10, false);
+    }
+
+    void maybe_emit_oob_for_array(const clang::Expr* base_expr, const clang::Expr* idx_expr,
+                                  const clang::Expr* report_site) {
+        if (base_expr == nullptr || idx_expr == nullptr)
+            return;
+        base_expr = strip_expr(base_expr);
+        idx_expr = strip_expr(idx_expr);
+
+        // Resolve base declaration if present
+        if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(base_expr)) {
+            if (const auto* var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl())) {
+                const clang::QualType t = var->getType();
+                if (t->isConstantArrayType()) {
+                    const auto* array_type =
+                        llvm::dyn_cast<clang::ConstantArrayType>(t.getTypePtr());
+                    if (!array_type)
+                        return;
+                    llvm::APInt size = array_type->getSize();
+                    auto index_opt = evaluate_integer(idx_expr, context_);
+                    if (index_opt.has_value()) {
+                        if (index_opt->isNegative() ||
+                            llvm::APSInt::compareValues(*index_opt, llvm::APSInt(size, true)) >=
+                                0) {
+                            emit_oob_warning_at(report_site, *index_opt, size);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Address-of to array: &arr + offset patterns
+        if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(base_expr)) {
+            if (unary->getOpcode() == clang::UO_AddrOf) {
+                const clang::Expr* sub = unary->getSubExpr()->IgnoreParenCasts();
+                if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(sub)) {
+                    if (const auto* var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl())) {
+                        const clang::QualType t = var->getType();
+                        if (t->isConstantArrayType()) {
+                            const auto* array_type =
+                                llvm::dyn_cast<clang::ConstantArrayType>(t.getTypePtr());
+                            if (!array_type)
+                                return;
+                            llvm::APInt size = array_type->getSize();
+                            auto index_opt = evaluate_integer(idx_expr, context_);
+                            if (index_opt.has_value()) {
+                                if (index_opt->isNegative() ||
+                                    llvm::APSInt::compareValues(*index_opt,
+                                                                llvm::APSInt(size, true)) >= 0) {
+                                    emit_oob_warning_at(report_site, *index_opt, size);
+                                }
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If base expression itself carries a constant array type (e.g., array expression)
+        if (base_expr->getType()->isConstantArrayType()) {
+            const auto* array_type =
+                llvm::dyn_cast<clang::ConstantArrayType>(base_expr->getType().getTypePtr());
+            if (array_type) {
+                llvm::APInt size = array_type->getSize();
+                auto index_opt = evaluate_integer(idx_expr, context_);
+                if (index_opt.has_value()) {
+                    if (index_opt->isNegative() ||
+                        llvm::APSInt::compareValues(*index_opt, llvm::APSInt(size, true)) >= 0) {
+                        emit_oob_warning_at(report_site, *index_opt, size);
+                    }
+                }
+                return;
+            }
+        }
     }
 
     const clang::FunctionDecl* function_;

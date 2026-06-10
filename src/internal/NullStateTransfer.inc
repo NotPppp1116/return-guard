@@ -1,10 +1,11 @@
 class Transfer final {
-  public:
-    Transfer(
-        State& state,
-        const NullSource& target,
-        std::unordered_set<const clang::Expr*>* unsafe)
-        : state_(state), target_(target), unsafe_(unsafe) {}
+    public:
+        Transfer(
+                State& state,
+                const NullSource& target,
+                std::unordered_set<const clang::Expr*>* unsafe,
+                clang::ASTContext& context)
+                : state_(state), target_(target), unsafe_(unsafe), context_(context) {}
 
     void process(const clang::Stmt* statement) {
         if (statement == nullptr) {
@@ -44,6 +45,14 @@ class Transfer final {
             return {};
         }
 
+        // Treat explicit null pointer constants as definite null sources.
+        if (is_null_pointer_constant(expression, context_)) {
+            return {
+                .origin = Origin::Yes,
+                .null_state = NullState::Null,
+            };
+        }
+
         if (is_source(expression, target_)) {
             if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expression)) {
                 for (const clang::Expr* argument : call->arguments()) {
@@ -54,6 +63,15 @@ class Transfer final {
                 .origin = Origin::Yes,
                 .null_state = NullState::MaybeNull,
             };
+        }
+
+        // Prefer expression-level facts for members/array slots that were
+        // recorded during assignment handling.
+        {
+            const PointerFact expr_fact = state_.fact_for_expr(expression);
+            if (expr_fact.origin != Origin::No) {
+                return expr_fact;
+            }
         }
 
         if (const auto* reference = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
@@ -83,6 +101,10 @@ class Transfer final {
             if (member->isArrow()) {
                 diagnose(expression, base);
             }
+            const PointerFact expr_fact = state_.fact_for_expr(expression);
+            if (expr_fact.origin != Origin::No) {
+                return expr_fact;
+            }
             return {};
         }
 
@@ -90,6 +112,10 @@ class Transfer final {
             const PointerFact base = evaluate(subscript->getBase());
             diagnose(expression, base);
             evaluate(subscript->getIdx());
+            const PointerFact expr_fact = state_.fact_for_expr(expression);
+            if (expr_fact.origin != Origin::No) {
+                return expr_fact;
+            }
             return {};
         }
 
@@ -112,7 +138,7 @@ class Transfer final {
         if (const auto* binary = llvm::dyn_cast<clang::BinaryOperator>(expression)) {
             if (binary->getOpcode() == clang::BO_Assign) {
                 const PointerFact value = evaluate(binary->getRHS());
-                evaluate_assignment_target(binary->getLHS());
+                evaluate_assignment_target(binary->getLHS(), value);
                 if (const clang::ValueDecl* declaration = lvalue_declaration(binary->getLHS())) {
                     state_.set(
                         declaration,
@@ -173,10 +199,16 @@ class Transfer final {
     }
 
   private:
-    void evaluate_assignment_target(const clang::Expr* expression) {
+    void evaluate_assignment_target(const clang::Expr* expression, const PointerFact& value) {
         expression = strip_expr(expression);
-        if (expression == nullptr || llvm::isa<clang::DeclRefExpr>(expression)) {
+        if (expression == nullptr) {
             return;
+        }
+        if (llvm::isa<clang::DeclRefExpr>(expression)) {
+            return;
+        }
+        if (expression->getType() != nullptr && expression->getType()->isPointerType()) {
+            state_.set_expr(expression, value);
         }
         evaluate(expression);
     }
@@ -192,14 +224,16 @@ class Transfer final {
     State& state_;
     const NullSource& target_;
     std::unordered_set<const clang::Expr*>* unsafe_;
+    clang::ASTContext& context_;
 };
 
 void transfer_block(
     const clang::CFGBlock& block,
     State& state,
     const NullSource& target,
-    std::unordered_set<const clang::Expr*>* unsafe) {
-    Transfer transfer(state, target, unsafe);
+    std::unordered_set<const clang::Expr*>* unsafe,
+    const clang::ASTContext& context) {
+    Transfer transfer(state, target, unsafe, const_cast<clang::ASTContext&>(context));
     for (const clang::CFGElement& element : block) {
         if (const auto statement = element.getAs<clang::CFGStmt>()) {
             transfer.process(statement->getStmt());
@@ -233,4 +267,3 @@ State state_for_successor(
             : constraint.false_state);
     return state;
 }
-
