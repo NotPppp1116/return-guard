@@ -3,6 +3,7 @@
 #include "AstUtils.hpp"
 #include "DomainUtils.hpp"
 #include "ReturnCollector.hpp"
+#include "ValueSetInference.hpp"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Attr.h>
@@ -13,8 +14,6 @@
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Casting.h>
 
-#include "ValueSetInference.hpp"
-
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -22,6 +21,21 @@
 #include <vector>
 
 namespace returnguard::internal {
+namespace {
+
+void merge_values(Domain& destination, const Domain& source) {
+    for (const DomainValue& value : source.values) {
+        if (value.labels.empty()) {
+            add_domain_value(destination, value.value, "");
+            continue;
+        }
+        for (const std::string& label : value.labels) {
+            add_domain_value(destination, value.value, label);
+        }
+    }
+}
+
+} // namespace
 
 Domain Analyzer::enum_domain(const clang::EnumDecl* declaration) const {
     Domain domain;
@@ -119,10 +133,89 @@ Analyzer::expression_domain(const clang::Expr* expression,
     return inference.infer_expression(expression, active_functions, active_variables);
 }
 
+Domain Analyzer::infer_function_domain_once(const clang::FunctionDecl* function) {
+    const clang::FunctionDecl* canonical = function->getCanonicalDecl();
+
+    Domain annotated = annotation_domain(canonical);
+    if (annotated.finite) {
+        return annotated;
+    }
+
+    Domain by_type = type_domain(canonical->getReturnType());
+    if (by_type.finite) {
+        return by_type;
+    }
+
+    const clang::FunctionDecl* definition = nullptr;
+    if (!canonical->hasBody(definition) || definition == nullptr) {
+        return by_type;
+    }
+
+    std::vector<const clang::ReturnStmt*> return_statements;
+    ReturnCollector collector(context_, return_statements);
+    collector.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
+
+    Domain inferred;
+    inferred.type_name = canonical->getReturnType().getAsString();
+    inferred.inferred_from_body = true;
+
+    bool saw_value = false;
+    bool complete = !return_statements.empty();
+    std::unordered_set<const clang::FunctionDecl*> active_functions;
+    active_functions.insert(canonical);
+
+    for (const clang::ReturnStmt* statement : return_statements) {
+        if (statement == nullptr || statement->getRetValue() == nullptr) {
+            complete = false;
+            continue;
+        }
+
+        std::unordered_set<const clang::VarDecl*> active_variables;
+        const std::optional<Domain> part = expression_domain(
+            statement->getRetValue(), active_functions, active_variables);
+        if (!part.has_value() || !part->finite) {
+            complete = false;
+            continue;
+        }
+
+        saw_value = true;
+        merge_values(inferred, *part);
+    }
+
+    inferred.finite = complete && saw_value && !inferred.values.empty();
+    return inferred;
+}
+
 Domain Analyzer::function_domain(const clang::FunctionDecl* function,
                                  std::unordered_set<const clang::FunctionDecl*>& active) {
     const clang::FunctionDecl* canonical = function->getCanonicalDecl();
-    if (const auto found = domain_cache_.find(canonical); found != domain_cache_.end()) {
+
+    if (summaries_building_ || summaries_prepared_) {
+        if (const auto found = domain_cache_.find(canonical);
+            found != domain_cache_.end()) {
+            Domain result = found->second;
+            if (collecting_domain_values_) {
+                const Domain annotated = annotation_domain(canonical);
+                const Domain by_type = type_domain(canonical->getReturnType());
+                result.finite = annotated.finite || by_type.finite ||
+                                !result.values.empty();
+            } else if (validating_domain_completeness_) {
+                const auto complete = domain_complete_.find(canonical);
+                result.finite = complete != domain_complete_.end() &&
+                                complete->second;
+            }
+            return result;
+        }
+
+        Domain annotated = annotation_domain(canonical);
+        if (annotated.finite) {
+            return annotated;
+        }
+        return type_domain(canonical->getReturnType());
+    }
+
+    if (const auto found = domain_cache_.find(canonical);
+        found != domain_cache_.end()) {
         return found->second;
     }
 
@@ -145,55 +238,37 @@ Domain Analyzer::function_domain(const clang::FunctionDecl* function,
         return by_type;
     }
 
-    std::vector<const clang::ReturnStmt*> return_stmts;
-    ReturnCollector collector(context_, return_stmts);
+    std::vector<const clang::ReturnStmt*> return_statements;
+    ReturnCollector collector(context_, return_statements);
     collector.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
 
-    std::vector<const clang::Expr*> returns;
-    for (const clang::ReturnStmt* stmt : return_stmts) {
-        if (stmt != nullptr && stmt->getRetValue() != nullptr) {
-            returns.push_back(stmt->getRetValue());
-        }
-    }
-
-    if (returns.empty()) {
-        active.erase(canonical);
-        domain_cache_[canonical] = by_type;
-        return by_type;
-    }
-
     Domain inferred;
-    inferred.finite = true;
+    inferred.finite = !return_statements.empty();
     inferred.inferred_from_body = true;
     inferred.type_name = function->getReturnType().getAsString();
 
-    for (const clang::Expr* return_expression : returns) {
-        std::unordered_set<const clang::VarDecl*> variables;
-        std::optional<Domain> part = expression_domain(return_expression, active, variables);
-        if (!part.has_value() || !part->finite) {
+    for (const clang::ReturnStmt* statement : return_statements) {
+        if (statement == nullptr || statement->getRetValue() == nullptr) {
             inferred.finite = false;
             break;
         }
 
-        for (DomainValue& value : part->values) {
-            if (value.labels.empty()) {
-                add_domain_value(inferred, value.value, "");
-            } else {
-                for (const std::string& label : value.labels) {
-                    add_domain_value(inferred, value.value, label);
-                }
-            }
+        std::unordered_set<const clang::VarDecl*> variables;
+        const std::optional<Domain> part =
+            expression_domain(statement->getRetValue(), active, variables);
+        if (!part.has_value() || !part->finite) {
+            inferred.finite = false;
+            break;
         }
+        merge_values(inferred, *part);
     }
 
     active.erase(canonical);
-
-    if (!inferred.finite) {
+    if (!inferred.finite || inferred.values.empty()) {
         domain_cache_[canonical] = by_type;
         return by_type;
     }
 
-    inferred.inferred_from_body = true;
     domain_cache_[canonical] = inferred;
     return inferred;
 }
