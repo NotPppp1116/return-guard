@@ -61,6 +61,8 @@ add_returnguard_test(
     --diagnostic-kind error
     --expected-exit-code 1)
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/null_state_cpp_test.cmake")
+
 set(RETURNGUARD_PROJECT_RUNNER
     "${CMAKE_SOURCE_DIR}/scripts/returnguard_project.py")
 
