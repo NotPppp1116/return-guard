@@ -8,6 +8,7 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/SourceManager.h>
+#include <llvm/Support/Casting.h>
 
 #include <algorithm>
 #include <optional>
@@ -126,12 +127,13 @@ class FlowHandlingFinder final
         : analyzer_(analyzer),
           call_(call),
           aliases_(aliases),
+          domain_(domain),
           accumulator_(domain) {}
 
     bool VisitSwitchStmt(clang::SwitchStmt* statement) {
         if (occurs_after(statement->getSwitchLoc()) &&
             contains_alias(statement->getCond(), aliases_)) {
-            accumulator_.add(analyzer_.analyze_switch(statement, domain()));
+            accumulator_.add(analyzer_.analyze_switch(statement, domain_));
         }
         return true;
     }
@@ -139,7 +141,7 @@ class FlowHandlingFinder final
     bool VisitIfStmt(clang::IfStmt* statement) {
         if (occurs_after(statement->getIfLoc()) &&
             contains_alias(statement->getCond(), aliases_)) {
-            accumulator_.add(analyzer_.analyze_if_chain(statement, aliases_, domain()));
+            accumulator_.add(analyzer_.analyze_if_chain(statement, aliases_, domain_));
         }
         return true;
     }
@@ -147,7 +149,7 @@ class FlowHandlingFinder final
     bool VisitWhileStmt(clang::WhileStmt* statement) {
         if (occurs_after(statement->getWhileLoc()) &&
             contains_alias(statement->getCond(), aliases_)) {
-            accumulator_.add(analyzer_.analyze_condition(statement->getCond(), aliases_, domain()));
+            accumulator_.add(analyzer_.analyze_condition(statement->getCond(), aliases_, domain_));
         }
         return true;
     }
@@ -155,7 +157,7 @@ class FlowHandlingFinder final
     bool VisitDoStmt(clang::DoStmt* statement) {
         if (occurs_after(statement->getDoLoc()) &&
             contains_alias(statement->getCond(), aliases_)) {
-            accumulator_.add(analyzer_.analyze_condition(statement->getCond(), aliases_, domain()));
+            accumulator_.add(analyzer_.analyze_condition(statement->getCond(), aliases_, domain_));
         }
         return true;
     }
@@ -163,7 +165,7 @@ class FlowHandlingFinder final
     bool VisitForStmt(clang::ForStmt* statement) {
         if (statement->getCond() != nullptr && occurs_after(statement->getForLoc()) &&
             contains_alias(statement->getCond(), aliases_)) {
-            accumulator_.add(analyzer_.analyze_condition(statement->getCond(), aliases_, domain()));
+            accumulator_.add(analyzer_.analyze_condition(statement->getCond(), aliases_, domain_));
         }
         return true;
     }
@@ -192,8 +194,6 @@ class FlowHandlingFinder final
     }
 
   private:
-    [[nodiscard]] const Domain& domain() const { return accumulator_domain_; }
-
     [[nodiscard]] bool occurs_after(clang::SourceLocation location) const {
         const clang::SourceManager& manager = analyzer_.source_manager();
         location = manager.getFileLoc(location);
@@ -208,7 +208,7 @@ class FlowHandlingFinder final
     Analyzer& analyzer_;
     const clang::CallExpr& call_;
     const ExpressionSet& aliases_;
-    const Domain& accumulator_domain_;
+    const Domain& domain_;
     ResultAccumulator accumulator_;
 };
 
