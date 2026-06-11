@@ -1,5 +1,6 @@
 #include "CFGValueFlow.hpp"
 
+#include "Analyzer.hpp"
 #include "AstUtils.hpp"
 
 #include <clang/AST/ASTContext.h>
@@ -84,6 +85,7 @@ struct PointsTo {
 struct State {
     std::unordered_map<StorageLocation, Origin, StorageLocationHash> values;
     std::unordered_map<StorageLocation, PointsTo, StorageLocationHash> pointers;
+    bool unchecked_use = false;
 
     bool operator==(const State&) const = default;
 
@@ -144,6 +146,9 @@ struct State {
             changed = changed || merged != old;
             pointers[location] = std::move(merged);
         }
+        const bool old_unchecked_use = unchecked_use;
+        unchecked_use = unchecked_use || other.unchecked_use;
+        changed = changed || unchecked_use != old_unchecked_use;
         return changed;
     }
 };
@@ -164,6 +169,26 @@ Origin read_origin(const State& state, const StorageSet& locations) {
     return result.value_or(Origin::No);
 }
 
+bool has_tracked_origin(const State& state) {
+    for (const auto& [unused, origin] : state.values) {
+        (void)unused;
+        if (origin != Origin::No) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void clear_tracked_origins(State& state) {
+    for (auto iterator = state.values.begin(); iterator != state.values.end();) {
+        if (iterator->second == Origin::No) {
+            ++iterator;
+            continue;
+        }
+        iterator = state.values.erase(iterator);
+    }
+}
+
 PointsTo read_pointer(const State& state, const StorageSet& locations) {
     PointsTo result;
     for (const StorageLocation& location : locations) {
@@ -174,8 +199,10 @@ PointsTo read_pointer(const State& state, const StorageSet& locations) {
 
 class Evaluator final {
   public:
-    Evaluator(State& state, const clang::CallExpr* target, ExpressionSet* aliases)
-        : state_(state), target_(target), aliases_(aliases) {}
+    Evaluator(State& state, const clang::CallExpr* target, ExpressionSet* aliases,
+              bool track_unchecked_uses = false)
+        : state_(state), target_(target), aliases_(aliases),
+          track_unchecked_uses_(track_unchecked_uses) {}
 
     Evaluation evaluate(const clang::Expr* expression) {
         if (expression == nullptr) {
@@ -209,7 +236,10 @@ class Evaluator final {
         }
 
         if (const auto* return_statement = llvm::dyn_cast<clang::ReturnStmt>(statement)) {
-            evaluate(return_statement->getRetValue());
+            const Evaluation result = evaluate(return_statement->getRetValue());
+            if (result.origin != Origin::No) {
+                clear_tracked_origins(state_);
+            }
             return;
         }
 
@@ -355,8 +385,13 @@ class Evaluator final {
                 return rhs;
             }
 
-            evaluate(binary->getLHS());
-            evaluate(binary->getRHS());
+            const Evaluation lhs = evaluate(binary->getLHS());
+            const Evaluation rhs = evaluate(binary->getRHS());
+            if (track_unchecked_uses_ && !binary->isComparisonOp() &&
+                !binary->isLogicalOp() &&
+                (lhs.origin != Origin::No || rhs.origin != Origin::No)) {
+                state_.unchecked_use = true;
+            }
             return {};
         }
 
@@ -423,6 +458,7 @@ class Evaluator final {
     State& state_;
     const clang::CallExpr* target_;
     ExpressionSet* aliases_;
+    bool track_unchecked_uses_;
 };
 
 void transfer_block(const clang::CFGBlock& block, State& state, const clang::CallExpr* target,
@@ -439,6 +475,56 @@ void transfer_block(const clang::CFGBlock& block, State& state, const clang::Cal
                 llvm::dyn_cast_or_null<clang::Expr>(block.getTerminatorCondition())) {
             evaluator.evaluate(condition);
         }
+    }
+}
+
+void transfer_block_for_live_paths(const clang::CFGBlock& block, State& state,
+                                   const clang::CallExpr& target, Analyzer& analyzer,
+                                   const Domain& domain) {
+    Evaluator evaluator(state, &target, nullptr, true);
+    for (const clang::CFGElement& element : block) {
+        if (const auto statement = element.getAs<clang::CFGStmt>()) {
+            evaluator.process(statement->getStmt());
+        }
+    }
+
+    const auto* terminator = block.getTerminatorStmt();
+    const auto* condition = llvm::dyn_cast_or_null<clang::Expr>(block.getTerminatorCondition());
+    if (condition == nullptr) {
+        if (const auto* if_statement = llvm::dyn_cast_or_null<clang::IfStmt>(terminator)) {
+            condition = if_statement->getCond();
+        } else if (const auto* switch_statement =
+                       llvm::dyn_cast_or_null<clang::SwitchStmt>(terminator)) {
+            condition = switch_statement->getCond();
+        }
+    }
+    if (condition == nullptr || !has_tracked_origin(state)) {
+        return;
+    }
+
+    ExpressionSet aliases;
+    Evaluator condition_evaluator(state, &target, &aliases);
+    condition_evaluator.evaluate(condition);
+    if (aliases.empty()) {
+        return;
+    }
+
+    CheckResult result;
+    result.kind = HandlingKind::PartiallyChecked;
+    if (terminator != nullptr) {
+        if (const auto* if_statement = llvm::dyn_cast<clang::IfStmt>(terminator)) {
+            result = analyzer.analyze_if_chain(if_statement, aliases, domain);
+        } else if (const auto* switch_statement = llvm::dyn_cast<clang::SwitchStmt>(terminator)) {
+            result = analyzer.analyze_switch(switch_statement, domain);
+        } else {
+            result = analyzer.analyze_condition(condition, aliases, domain);
+        }
+    } else {
+        result = analyzer.analyze_condition(condition, aliases, domain);
+    }
+
+    if (result.kind == HandlingKind::ExhaustivelyChecked) {
+        clear_tracked_origins(state);
     }
 }
 
@@ -563,6 +649,49 @@ ExpressionSet CFGValueFlow::aliases_for(const clang::ValueDecl& declaration) con
         transfer_block(*block, state, nullptr, &aliases);
     }
     return aliases;
+}
+
+bool CFGValueFlow::has_unhandled_live_path(const clang::CallExpr& call, Analyzer& analyzer,
+                                           const Domain& domain) const {
+    (void)context_;
+    const unsigned block_count = cfg_->getNumBlockIDs();
+    std::vector<std::optional<State>> inputs(block_count);
+    std::deque<const clang::CFGBlock*> worklist;
+
+    const clang::CFGBlock& entry = cfg_->getEntry();
+    inputs[entry.getBlockID()] = State{};
+    worklist.push_back(&entry);
+
+    while (!worklist.empty()) {
+        const clang::CFGBlock* block = worklist.front();
+        worklist.pop_front();
+
+        State output = *inputs[block->getBlockID()];
+        transfer_block_for_live_paths(*block, output, call, analyzer, domain);
+
+        for (const clang::CFGBlock* successor : block->succs()) {
+            if (successor == nullptr) {
+                continue;
+            }
+
+            std::optional<State>& input = inputs[successor->getBlockID()];
+            if (!input.has_value()) {
+                input = output;
+                worklist.push_back(successor);
+                continue;
+            }
+
+            State merged = *input;
+            if (merged.join(output)) {
+                input = std::move(merged);
+                worklist.push_back(successor);
+            }
+        }
+    }
+
+    const clang::CFGBlock& exit = cfg_->getExit();
+    const std::optional<State>& exit_input = inputs[exit.getBlockID()];
+    return exit_input.has_value() && exit_input->unchecked_use && has_tracked_origin(*exit_input);
 }
 
 } // namespace returnguard::internal

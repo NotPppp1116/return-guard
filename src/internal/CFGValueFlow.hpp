@@ -15,6 +15,8 @@ class ValueDecl;
 
 namespace returnguard::internal {
 
+class Analyzer;
+
 class CFGValueFlow final {
   public:
     static std::unique_ptr<CFGValueFlow> build(const clang::FunctionDecl& function,
@@ -22,6 +24,8 @@ class CFGValueFlow final {
 
     [[nodiscard]] ExpressionSet aliases_for(const clang::CallExpr& call) const;
     [[nodiscard]] ExpressionSet aliases_for(const clang::ValueDecl& declaration) const;
+    [[nodiscard]] bool has_unhandled_live_path(const clang::CallExpr& call, Analyzer& analyzer,
+                                               const Domain& domain) const;
 
   private:
     CFGValueFlow(std::unique_ptr<clang::CFG> cfg, clang::ASTContext& context);

@@ -45,6 +45,9 @@ add_returnguard_test(returnguard.inference_complex inference_complex.c strict 6 
 add_returnguard_clean_test(returnguard.value_inference_recursion value_inference_recursion.c practical)
 add_returnguard_test(returnguard.inference_cfg inference_cfg.c strict 1 "no final else")
 add_returnguard_test(returnguard.return_flow_cfg return_flow_cfg.c strict 3 "CFG-proven")
+add_returnguard_test(
+    returnguard.cfg_path_handling cfg_path_handling.c strict 1
+    "not handled on every reachable CFG path")
 add_returnguard_test(returnguard.if_chains if_chains.c practical 1 "missing 32")
 add_returnguard_test(returnguard.direct_if direct_if.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.loop_conditions loop_conditions.c practical 2 "missing 32")

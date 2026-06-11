@@ -267,7 +267,18 @@ std::optional<CheckResult> Analyzer::analyze_flow_aliases(const clang::CallExpr*
 
     FlowHandlingFinder finder(*this, call->getEndLoc(), aliases, domain);
     finder.TraverseStmt(const_cast<clang::Stmt*>(function->getBody()));
-    return finder.result();
+    std::optional<CheckResult> result = finder.result();
+    if (result.has_value() &&
+        (result->kind == HandlingKind::ExhaustivelyChecked ||
+         result->kind == HandlingKind::Forwarded) &&
+        flow->has_unhandled_live_path(*call, *this, domain)) {
+        return CheckResult{
+            .kind = HandlingKind::Consumed,
+            .missing = {},
+            .detail = "stored result is not handled on every reachable CFG path",
+        };
+    }
+    return result;
 }
 
 bool Analyzer::function_checks_parameter(const clang::FunctionDecl* function, unsigned param_index,
