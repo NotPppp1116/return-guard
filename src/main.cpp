@@ -69,6 +69,20 @@ llvm::cl::opt<std::string> instrument_output(
     llvm::cl::init(""),
     llvm::cl::cat(category));
 
+llvm::cl::opt<std::string> site_map_output(
+    "site-map-output",
+    llvm::cl::desc(
+        "Write JSON metadata mapping instrumented site IDs to source locations"),
+    llvm::cl::init(""),
+    llvm::cl::cat(category));
+
+llvm::cl::opt<std::string> site_root(
+    "site-root",
+    llvm::cl::desc(
+        "Normalize site-map source paths relative to this project root"),
+    llvm::cl::init(""),
+    llvm::cl::cat(category));
+
 returnguard::Mode parse_mode(llvm::StringRef value) {
     if (value == "practical") {
         return returnguard::Mode::Practical;
@@ -118,6 +132,16 @@ int main(int argc, const char** argv) {
             << "returnguard: --instrument-output requires exactly one source file\n";
         return 2;
     }
+    if (!site_map_output.empty() && instrument_output.empty()) {
+        llvm::errs()
+            << "returnguard: --site-map-output requires --instrument-output\n";
+        return 2;
+    }
+    if (!site_root.empty() && site_map_output.empty()) {
+        llvm::errs()
+            << "returnguard: --site-root requires --site-map-output\n";
+        return 2;
+    }
 
     returnguard::set_options({
         .mode = parse_mode(mode_option),
@@ -128,6 +152,8 @@ int main(int argc, const char** argv) {
         .fail_on_diagnostics = fail_on_diagnostics,
         .color = !no_color,
         .instrument_output = instrument_output,
+        .site_map_output = site_map_output,
+        .site_root = site_root,
     });
 
     clang::tooling::ClangTool tool(
