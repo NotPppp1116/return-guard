@@ -411,6 +411,18 @@ BranchConstraint condition_constraint(
         return {};
     }
 
+    // Support boolean variables initialized from pointer-null comparisons, e.g.
+    //  bool missing = ptr == NULL;
+    //  if (missing) { ... }
+    // In that case, analyze the initializer expression as the condition.
+    if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
+        if (const auto* var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl())) {
+            if (var->getInit() != nullptr) {
+                return condition_constraint(var->getInit(), state, target, context);
+            }
+        }
+    }
+
     if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(expression);
         unary != nullptr && unary->getOpcode() == clang::UO_LNot) {
         return invert_constraint(condition_constraint(

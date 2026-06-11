@@ -73,6 +73,7 @@ add_returnguard_test(returnguard.must_check must_check.c practical 2 "must_check
 add_returnguard_test(returnguard.nodiscard nodiscard.cpp practical 1 "nodiscard_status")
 add_returnguard_clean_test(returnguard.bool_predicate bool_predicate.c practical)
 add_returnguard_test(returnguard.bool_predicate_strict bool_predicate.c strict 1 "ready")
+add_returnguard_clean_test(returnguard.bool_binding_condition bool_binding_condition.c practical)
 add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4, 32")
 add_returnguard_clean_test(returnguard.std_value_helpers std_value_helpers.cpp strict)
 add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")

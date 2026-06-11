@@ -84,6 +84,72 @@ std::optional<Domain> ValueSetInference::infer_expression(
             if (d.finite) {
                 return d;
             }
+        } else {
+            const clang::Expr* callee_expr = strip_expr(call->getCallee());
+            if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(callee_expr)) {
+                if (const auto* param = llvm::dyn_cast<clang::ParmVarDecl>(ref->getDecl())) {
+                    const auto* function = llvm::dyn_cast<clang::FunctionDecl>(param->getDeclContext());
+                    if (function) {
+                        unsigned param_index = param->getFunctionScopeIndex();
+                        class CallSiteFinder : public clang::RecursiveASTVisitor<CallSiteFinder> {
+                          public:
+                            CallSiteFinder(const clang::FunctionDecl* target) : target_(target->getCanonicalDecl()) {}
+                            bool VisitCallExpr(clang::CallExpr* c) {
+                                if (const clang::FunctionDecl* callee = c->getDirectCallee()) {
+                                    if (callee->getCanonicalDecl() == target_) {
+                                        calls_.push_back(c);
+                                    }
+                                }
+                                return true;
+                            }
+                            const clang::FunctionDecl* target_;
+                            std::vector<const clang::CallExpr*> calls_;
+                        };
+                        CallSiteFinder finder(function);
+                        finder.TraverseDecl(context_.getTranslationUnitDecl());
+                        
+                        if (!finder.calls_.empty()) {
+                            Domain combined;
+                            combined.finite = true;
+                            combined.inferred_from_body = true;
+                            combined.type_name = call->getType().getAsString();
+                            for (const clang::CallExpr* c : finder.calls_) {
+                                if (param_index >= c->getNumArgs()) continue;
+                                const clang::Expr* arg = strip_expr(c->getArg(param_index));
+                                if (const auto* arg_unary = llvm::dyn_cast<clang::UnaryOperator>(arg)) {
+                                    if (arg_unary->getOpcode() == clang::UO_AddrOf) {
+                                        arg = strip_expr(arg_unary->getSubExpr());
+                                    }
+                                }
+                                if (const auto* arg_ref = llvm::dyn_cast<clang::DeclRefExpr>(arg)) {
+                                    if (const auto* passed_func = llvm::dyn_cast<clang::FunctionDecl>(arg_ref->getDecl())) {
+                                        Domain d = analyzer_.function_domain(passed_func, active_functions);
+                                        if (!d.finite) {
+                                            combined.finite = false;
+                                            break;
+                                        }
+                                        for (const auto& val : d.values) {
+                                            for (const auto& label : val.labels) {
+                                                add_domain_value(combined, val.value, label);
+                                            }
+                                            if (val.labels.empty()) {
+                                                add_domain_value(combined, val.value, "");
+                                            }
+                                        }
+                                    } else {
+                                        combined.finite = false;
+                                        break;
+                                    }
+                                } else {
+                                    combined.finite = false;
+                                    break;
+                                }
+                            }
+                            if (combined.finite) return combined;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -226,10 +292,57 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
                                   std::unordered_set<const clang::FunctionDecl*>& active_functions,
                                   std::unordered_set<const clang::VarDecl*>& active_variables) {
     if (llvm::isa<clang::ParmVarDecl>(variable)) {
-        return std::nullopt;
-    }
-
-    if (!variable->isLocalVarDecl()) {
+        const auto* param = llvm::dyn_cast<clang::ParmVarDecl>(variable);
+        const auto* function = llvm::dyn_cast<clang::FunctionDecl>(param->getDeclContext());
+        if (!function) return std::nullopt;
+        
+        unsigned param_index = param->getFunctionScopeIndex();
+        
+        class CallSiteFinder : public clang::RecursiveASTVisitor<CallSiteFinder> {
+          public:
+            CallSiteFinder(const clang::FunctionDecl* target) : target_(target->getCanonicalDecl()) {}
+            bool VisitCallExpr(clang::CallExpr* c) {
+                if (const clang::FunctionDecl* callee = c->getDirectCallee()) {
+                    if (callee->getCanonicalDecl() == target_) {
+                        calls_.push_back(c);
+                    }
+                }
+                return true;
+            }
+            const clang::FunctionDecl* target_;
+            std::vector<const clang::CallExpr*> calls_;
+        };
+        
+        CallSiteFinder finder(function);
+        finder.TraverseDecl(context_.getTranslationUnitDecl());
+        
+        if (finder.calls_.empty()) {
+            return std::nullopt;
+        }
+        
+        Domain combined;
+        combined.finite = true;
+        combined.inferred_from_body = true;
+        combined.type_name = variable->getType().getAsString();
+        
+        for (const clang::CallExpr* call : finder.calls_) {
+            if (param_index >= call->getNumArgs()) continue;
+            const clang::Expr* arg = call->getArg(param_index);
+            auto part = infer_expression(arg, active_functions, active_variables);
+            if (!part || !part->finite) {
+                combined.finite = false;
+                break;
+            }
+            for (const auto& val : part->values) {
+                for (const auto& label : val.labels) {
+                    add_domain_value(combined, val.value, label);
+                }
+                if (val.labels.empty()) {
+                    add_domain_value(combined, val.value, "");
+                }
+            }
+        }
+        if (combined.finite) return combined;
         return std::nullopt;
     }
 
@@ -240,50 +353,98 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
 
     const clang::DeclContext* dc = variable->getDeclContext();
     const auto* function = llvm::dyn_cast_or_null<clang::FunctionDecl>(dc);
-    if (!function || !function->hasBody()) {
-        active_variables.erase(variable);
-        return std::nullopt;
-    }
 
-    clang::CFG::BuildOptions options;
-    std::unique_ptr<clang::CFG> cfg = clang::CFG::buildCFG(
-        function, function->getBody(), const_cast<clang::ASTContext*>(&context_), options);
-    if (!cfg) {
-        active_variables.erase(variable);
-        return std::nullopt;
-    }
+    std::vector<const clang::Expr*> assignments;
+    bool valid = true;
 
-    const clang::CFGBlock* reference_block = block_containing_reference(*cfg, reference_site);
-    if (reference_block == nullptr) {
-        active_variables.erase(variable);
-        return std::nullopt;
-    }
+    if (!variable->isLocalVarDecl()) {
+        class GlobalAssignmentFinder : public clang::RecursiveASTVisitor<GlobalAssignmentFinder> {
+          public:
+            GlobalAssignmentFinder(const clang::VarDecl* target) : target_(target) {}
 
-    const std::unordered_set<unsigned> reaching_blocks = blocks_reaching(*reference_block);
+            bool VisitBinaryOperator(clang::BinaryOperator* op) {
+                if (op->isAssignmentOp() && referenced_variable(op->getLHS()) == target_) {
+                    if (op->getOpcode() != clang::BO_Assign) {
+                        valid_ = false;
+                        return false;
+                    }
+                    assignments_.push_back(op->getRHS());
+                }
+                return true;
+            }
 
-    SimpleAssignmentFinder finder(variable, reference_site, context_);
-    finder.add_initializer_if_relevant();
+            bool VisitUnaryOperator(clang::UnaryOperator* op) {
+                if ((op->getOpcode() == clang::UO_AddrOf || op->isIncrementDecrementOp()) &&
+                    referenced_variable(op->getSubExpr()) == target_) {
+                    valid_ = false;
+                    return false;
+                }
+                return true;
+            }
 
-    for (const clang::CFGBlock* block : *cfg) {
-        if (block == nullptr || !reaching_blocks.contains(block->getBlockID())) {
-            continue;
+            bool valid_ = true;
+            std::vector<const clang::Expr*> assignments_;
+            
+          private:
+            const clang::VarDecl* target_;
+        };
+
+        GlobalAssignmentFinder global_finder(variable);
+        global_finder.TraverseDecl(context_.getTranslationUnitDecl());
+        if (variable->hasInit()) {
+            global_finder.assignments_.push_back(variable->getInit());
         }
-        for (const clang::CFGElement& element : *block) {
-            const auto statement = element.getAs<clang::CFGStmt>();
-            if (!statement.has_value()) {
+
+        valid = global_finder.valid_;
+        assignments = std::move(global_finder.assignments_);
+    } else {
+        if (!function || !function->hasBody()) {
+            active_variables.erase(variable);
+            return std::nullopt;
+        }
+
+        clang::CFG::BuildOptions options;
+        std::unique_ptr<clang::CFG> cfg = clang::CFG::buildCFG(
+            function, function->getBody(), const_cast<clang::ASTContext*>(&context_), options);
+        if (!cfg) {
+            active_variables.erase(variable);
+            return std::nullopt;
+        }
+
+        const clang::CFGBlock* reference_block = block_containing_reference(*cfg, reference_site);
+        if (reference_block == nullptr) {
+            active_variables.erase(variable);
+            return std::nullopt;
+        }
+
+        const std::unordered_set<unsigned> reaching_blocks = blocks_reaching(*reference_block);
+
+        SimpleAssignmentFinder finder(variable, reference_site, context_);
+        finder.add_initializer_if_relevant();
+
+        for (const clang::CFGBlock* block : *cfg) {
+            if (block == nullptr || !reaching_blocks.contains(block->getBlockID())) {
                 continue;
             }
-            finder.TraverseStmt(const_cast<clang::Stmt*>(statement->getStmt()));
+            for (const clang::CFGElement& element : *block) {
+                const auto statement = element.getAs<clang::CFGStmt>();
+                if (!statement.has_value()) {
+                    continue;
+                }
+                finder.TraverseStmt(const_cast<clang::Stmt*>(statement->getStmt()));
+                if (!finder.valid_) {
+                    break;
+                }
+            }
             if (!finder.valid_) {
                 break;
             }
         }
-        if (!finder.valid_) {
-            break;
-        }
+        valid = finder.valid_;
+        assignments = std::move(finder.assignments_);
     }
 
-    if (!finder.valid_ || finder.assignments_.empty()) {
+    if (!valid || assignments.empty()) {
         active_variables.erase(variable);
         return std::nullopt;
     }
@@ -293,7 +454,7 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
     combined.inferred_from_body = true;
     combined.type_name = variable->getType().getAsString();
 
-    for (const auto* assignment : finder.assignments_) {
+    for (const auto* assignment : assignments) {
         auto part = infer_expression(assignment, active_functions, active_variables);
         if (!part || !part->finite) {
             combined.finite = false;
