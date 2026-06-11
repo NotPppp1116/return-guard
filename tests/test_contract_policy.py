@@ -55,6 +55,8 @@ def main() -> int:
         "return value of 'openat' is consumed but not verified",
         "return value of 'close' is consumed but not verified",
         "return value of 'fputs' is consumed but not verified",
+        "potentially-null return value of 'malloc' is dereferenced without a prior null check",
+        "potentially-null return value of 'getenv' is dereferenced without a prior null check",
     ):
         if expected not in base.stdout:
             return fail(f"missing built-in contract diagnostic: {expected}", base.stdout)

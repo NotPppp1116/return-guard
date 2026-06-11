@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -28,4 +29,13 @@ void system_namespace_sample(void) {
 
 int configured_null_contract_sample(void) {
     return null_factory()->value;
+}
+
+int system_malloc_contract_sample(void) {
+    Node* node = static_cast<Node*>(std::malloc(sizeof(Node)));
+    return node->value;
+}
+
+int system_getenv_contract_sample(void) {
+    return ::getenv("RETURNGUARD_CONTRACT_SAMPLE")[0];
 }

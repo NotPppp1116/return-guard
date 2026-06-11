@@ -139,10 +139,15 @@ std::optional<FailurePredicate> failure_contract(const clang::FunctionDecl& func
     const bool standard = is_std_context(function);
 
     if ((global || standard) && has_any_name(function, {
+                                                           "aligned_alloc",
+                                                           "calloc",
                                                            "fopen",
                                                            "freopen",
                                                            "fmemopen",
+                                                           "malloc",
                                                            "open_memstream",
+                                                           "realloc",
+                                                           "reallocarray",
                                                            "tmpfile",
                                                        })) {
         return FailurePredicate::Null;
@@ -150,10 +155,15 @@ std::optional<FailurePredicate> failure_contract(const clang::FunctionDecl& func
 
     if (global && has_any_name(function, {
                                              "fdopen",
+                                             "getenv",
                                              "popen",
                                              "opendir",
                                              "fdopendir",
                                              "dlopen",
+                                             "realpath",
+                                             "secure_getenv",
+                                             "strdup",
+                                             "strndup",
                                              "wl_client_create",
                                              "wl_display_create",
                                              "wl_event_loop_add_fd",
