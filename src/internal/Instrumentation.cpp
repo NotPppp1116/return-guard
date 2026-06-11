@@ -1,6 +1,9 @@
 #include "Instrumentation.hpp"
 
+#include <returnguard/Options.hpp>
+
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/ASTTypeTraits.h>
 #include <clang/AST/Attr.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
@@ -10,8 +13,12 @@
 #include <clang/Rewrite/Core/Rewriter.h>
 #include <llvm/ADT/StringRef.h>
 
+#include <filesystem>
 #include <optional>
 #include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 namespace returnguard::internal {
 namespace {
@@ -57,11 +64,29 @@ contract_annotation(const clang::FunctionDecl& function) {
     return std::nullopt;
 }
 
+std::uint64_t hash_site_key(llvm::StringRef key) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const char character : key) {
+        hash ^= static_cast<unsigned char>(character);
+        hash *= 1099511628211ULL;
+    }
+    return hash == 0U ? 1U : hash;
+}
+
+bool path_stays_inside_root(const std::filesystem::path& relative) {
+    if (relative.empty() || relative.is_absolute()) {
+        return false;
+    }
+    const auto first = relative.begin();
+    return first == relative.end() || *first != std::filesystem::path("..");
+}
+
 } // namespace
 
 Instrumentation::Instrumentation(clang::ASTContext& context,
-                                 clang::Rewriter& rewriter)
-    : context_(context), rewriter_(rewriter) {}
+                                 clang::Rewriter& rewriter,
+                                 std::vector<SiteMetadata>& sites)
+    : context_(context), rewriter_(rewriter), sites_(sites) {}
 
 bool Instrumentation::should_instrument(const CheckResult& handling) const {
     return handling.kind == HandlingKind::Ignored ||
@@ -152,14 +177,19 @@ bool Instrumentation::wrap_call(const clang::CallExpr* call,
     clang::CharSourceRange range = clang::CharSourceRange::getTokenRange(begin, end);
     range = clang::Lexer::makeFileCharRange(range, source_manager,
                                             context_.getLangOpts());
-    if (range.isInvalid() || !ensure_runtime_header()) {
+    if (range.isInvalid()) {
+        return false;
+    }
+
+    std::optional<SiteMetadata> metadata = metadata_for_call(call, predicate);
+    if (!metadata.has_value() || !ensure_runtime_header()) {
         return false;
     }
 
     const std::string prefix = predicate == FailurePredicate::Null
                                    ? "__RG_CHECK_NULL("
                                    : "__RG_CHECK_NEGATIVE(";
-    const std::string suffix = ", " + std::to_string(site_id(call)) + "u)";
+    const std::string suffix = ", " + std::to_string(metadata->id) + "ULL)";
 
     if (rewriter_.InsertTextAfterToken(end, suffix)) {
         return false;
@@ -167,22 +197,105 @@ bool Instrumentation::wrap_call(const clang::CallExpr* call,
     if (rewriter_.InsertTextBefore(begin, prefix)) {
         return false;
     }
+
+    sites_.push_back(std::move(*metadata));
     return true;
 }
 
-std::uint32_t Instrumentation::site_id(const clang::CallExpr* call) const {
+std::optional<SiteMetadata>
+Instrumentation::metadata_for_call(const clang::CallExpr* call,
+                                   FailurePredicate predicate) {
+    clang::SourceManager& source_manager = context_.getSourceManager();
+    const clang::SourceLocation location =
+        source_manager.getFileLoc(call->getExprLoc());
+    if (location.isInvalid()) {
+        return std::nullopt;
+    }
+
+    const clang::FunctionDecl* callee = call->getDirectCallee();
+    SiteMetadata metadata;
+    metadata.file = normalized_site_path(call);
+    metadata.line = source_manager.getSpellingLineNumber(location);
+    metadata.column = source_manager.getSpellingColumnNumber(location);
+    metadata.function = enclosing_function_name(call);
+    metadata.callee = callee == nullptr ? "<indirect>" : callee->getQualifiedNameAsString();
+    metadata.predicate = predicate == FailurePredicate::Null ? "null" : "negative";
+
+    const std::string key = metadata.file + '\x1f' +
+                            std::to_string(metadata.line) + '\x1f' +
+                            std::to_string(metadata.column) + '\x1f' +
+                            metadata.function + '\x1f' + metadata.callee + '\x1f' +
+                            metadata.predicate;
+    metadata.id = hash_site_key(key);
+
+    const auto [existing, inserted] = known_site_ids_.emplace(metadata.id, key);
+    if (!inserted && existing->second != key) {
+        clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
+        const unsigned diagnostic = diagnostics.getCustomDiagID(
+            clang::DiagnosticsEngine::Error,
+            "returnguard: site ID collision for %0; change the site-key scheme before building");
+        diagnostics.Report(location, diagnostic)
+            << static_cast<unsigned long long>(metadata.id);
+        return std::nullopt;
+    }
+
+    return metadata;
+}
+
+std::string Instrumentation::normalized_site_path(const clang::CallExpr* call) const {
     const clang::SourceManager& source_manager = context_.getSourceManager();
     const clang::SourceLocation location =
         source_manager.getFileLoc(call->getExprLoc());
-    const std::string key = source_manager.getFilename(location).str() + ":" +
-                            std::to_string(source_manager.getFileOffset(location));
-
-    std::uint32_t hash = 2166136261u;
-    for (const char character : key) {
-        hash ^= static_cast<unsigned char>(character);
-        hash *= 16777619u;
+    std::filesystem::path file(source_manager.getFilename(location).str());
+    if (file.empty()) {
+        return "<unknown>";
     }
-    return hash == 0u ? 1u : hash;
+
+    std::error_code error;
+    if (file.is_relative()) {
+        const std::filesystem::path absolute = std::filesystem::absolute(file, error);
+        if (!error) {
+            file = absolute;
+        }
+    }
+    file = file.lexically_normal();
+
+    if (!returnguard::options().site_root.empty()) {
+        std::filesystem::path root(returnguard::options().site_root);
+        error.clear();
+        if (root.is_relative()) {
+            const std::filesystem::path absolute = std::filesystem::absolute(root, error);
+            if (!error) {
+                root = absolute;
+            }
+        }
+        root = root.lexically_normal();
+
+        const std::filesystem::path relative = file.lexically_relative(root);
+        if (path_stays_inside_root(relative)) {
+            file = relative;
+        }
+    }
+
+    return file.generic_string();
+}
+
+std::string Instrumentation::enclosing_function_name(const clang::CallExpr* call) const {
+    clang::DynTypedNode node = clang::DynTypedNode::create(*call);
+    for (unsigned depth = 0U; depth < 128U; ++depth) {
+        const auto parents = context_.getParents(node);
+        if (parents.empty()) {
+            break;
+        }
+
+        for (const clang::DynTypedNode& parent : parents) {
+            if (const clang::FunctionDecl* function = parent.get<clang::FunctionDecl>()) {
+                return function->getQualifiedNameAsString();
+            }
+        }
+        node = parents[0];
+    }
+    return "<global>";
 }
 
 bool Instrumentation::ensure_runtime_header() {
