@@ -26,6 +26,8 @@ class Instrumentation final {
     };
 
     [[nodiscard]] bool should_instrument(const CheckResult& handling) const;
+    [[nodiscard]] bool validate_contract(const clang::CallExpr* call,
+                                         FailurePredicate predicate) const;
     [[nodiscard]] bool wrap_call(const clang::CallExpr* call,
                                  FailurePredicate predicate);
     [[nodiscard]] std::uint32_t site_id(const clang::CallExpr* call) const;
