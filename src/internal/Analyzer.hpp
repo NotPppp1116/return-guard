@@ -40,10 +40,13 @@ class CFGValueFlow;
 class HandlerFinder;
 class Instrumentation;
 class NullStateAnalysis;
+struct SiteMetadata;
 
 class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
   public:
-    explicit Analyzer(clang::ASTContext& context, clang::Rewriter* rewriter = nullptr);
+    explicit Analyzer(clang::ASTContext& context,
+                      clang::Rewriter* rewriter = nullptr,
+                      std::vector<SiteMetadata>* sites = nullptr);
     ~Analyzer();
 
     [[nodiscard]] bool shouldVisitTemplateInstantiations() const;
@@ -55,19 +58,19 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
     [[nodiscard]] const clang::SourceManager& source_manager() const;
 
     [[nodiscard]] CheckResult analyze_switch(const clang::SwitchStmt* statement,
-                                              const Domain& domain) const;
+                                               const Domain& domain) const;
     [[nodiscard]] CheckResult analyze_if_chain(const clang::IfStmt* statement,
-                                                const clang::VarDecl* variable,
-                                                const Domain& domain) const;
-    [[nodiscard]] CheckResult analyze_if_chain(const clang::IfStmt* statement,
-                                                const ExpressionSet& aliases,
-                                                const Domain& domain) const;
-    [[nodiscard]] CheckResult analyze_condition(const clang::Expr* condition,
                                                  const clang::VarDecl* variable,
                                                  const Domain& domain) const;
-    [[nodiscard]] CheckResult analyze_condition(const clang::Expr* condition,
+    [[nodiscard]] CheckResult analyze_if_chain(const clang::IfStmt* statement,
                                                  const ExpressionSet& aliases,
                                                  const Domain& domain) const;
+    [[nodiscard]] CheckResult analyze_condition(const clang::Expr* condition,
+                                                  const clang::VarDecl* variable,
+                                                  const Domain& domain) const;
+    [[nodiscard]] CheckResult analyze_condition(const clang::Expr* condition,
+                                                  const ExpressionSet& aliases,
+                                                  const Domain& domain) const;
 
     [[nodiscard]] std::optional<Domain>
     expression_domain(const clang::Expr* expression,
