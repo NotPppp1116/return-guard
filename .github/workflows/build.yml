@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  linux:
+  linux-ubuntu:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -15,15 +15,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install dependencies
+      - name: Install LLVM/Clang ${{ matrix.llvm-version }}
+        run: |
+          # Saca e executa o script oficial do repositório LLVM
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          # O argumento 'all' é crucial para instalar o llvm-22-dev e libclang-22-dev
+          sudo ./llvm.sh ${{ matrix.llvm-version }} all
+
+      - name: Install other dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            clang-${{ matrix.llvm-version }} \
-            llvm-${{ matrix.llvm-version }}-dev \
-            libclang-${{ matrix.llvm-version }}-dev \
             cmake \
-            ninja-build
+            ninja-build \
+            python3
 
       - name: Configure
         run: |
