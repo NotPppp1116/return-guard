@@ -1,5 +1,6 @@
 #include <returnguard/Runtime.h>
 
+#include <stdbool.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 
@@ -8,6 +9,7 @@
 #endif
 
 #define RETURNGUARD_SECRET_CAPACITY 64U
+#define RETURNGUARD_REGISTRY_UPDATE_SPINS 1000000U
 #define RETURNGUARD_SECONDARY_FATAL_SPINS 1000000U
 
 typedef enum SecretSlotState {
@@ -31,7 +33,28 @@ typedef struct SecretSlot {
 
 static SecretSlot secret_slots[RETURNGUARD_SECRET_CAPACITY];
 static atomic_flag secret_registry_lock = ATOMIC_FLAG_INIT;
+static atomic_uint registry_updates;
 static atomic_uint fatal_state;
+
+static bool begin_registry_update(void) {
+    if (atomic_load_explicit(&fatal_state, memory_order_acquire) !=
+        FATAL_STATE_IDLE) {
+        return false;
+    }
+
+    atomic_fetch_add_explicit(&registry_updates, 1U, memory_order_acq_rel);
+    if (atomic_load_explicit(&fatal_state, memory_order_acquire) ==
+        FATAL_STATE_IDLE) {
+        return true;
+    }
+
+    atomic_fetch_sub_explicit(&registry_updates, 1U, memory_order_release);
+    return false;
+}
+
+static void end_registry_update(void) {
+    atomic_fetch_sub_explicit(&registry_updates, 1U, memory_order_release);
+}
 
 static void lock_secret_registry(void) {
     while (atomic_flag_test_and_set_explicit(
@@ -57,6 +80,9 @@ ReturnGuardSecretResult returnguard_register_secret(void* memory, size_t size) {
     if (memory == NULL || size == 0U) {
         return RETURNGUARD_SECRET_INVALID;
     }
+    if (!begin_registry_update()) {
+        return RETURNGUARD_SECRET_BUSY;
+    }
 
     lock_secret_registry();
 
@@ -69,6 +95,7 @@ ReturnGuardSecretResult returnguard_register_secret(void* memory, size_t size) {
         if ((state == SECRET_SLOT_READY || state == SECRET_SLOT_WIPING) &&
             slot->memory == memory) {
             unlock_secret_registry();
+            end_registry_update();
             return state == SECRET_SLOT_READY
                        ? RETURNGUARD_SECRET_ALREADY_REGISTERED
                        : RETURNGUARD_SECRET_BUSY;
@@ -80,6 +107,7 @@ ReturnGuardSecretResult returnguard_register_secret(void* memory, size_t size) {
 
     if (free_slot == NULL) {
         unlock_secret_registry();
+        end_registry_update();
         return RETURNGUARD_SECRET_REGISTRY_FULL;
     }
 
@@ -91,12 +119,16 @@ ReturnGuardSecretResult returnguard_register_secret(void* memory, size_t size) {
         &free_slot->state, SECRET_SLOT_READY, memory_order_release);
 
     unlock_secret_registry();
+    end_registry_update();
     return RETURNGUARD_SECRET_OK;
 }
 
 ReturnGuardSecretResult returnguard_unregister_secret(void* memory) {
     if (memory == NULL) {
         return RETURNGUARD_SECRET_INVALID;
+    }
+    if (!begin_registry_update()) {
+        return RETURNGUARD_SECRET_BUSY;
     }
 
     lock_secret_registry();
@@ -112,6 +144,7 @@ ReturnGuardSecretResult returnguard_unregister_secret(void* memory) {
         }
         if (state == SECRET_SLOT_WIPING) {
             unlock_secret_registry();
+            end_registry_update();
             return RETURNGUARD_SECRET_BUSY;
         }
 
@@ -124,6 +157,7 @@ ReturnGuardSecretResult returnguard_unregister_secret(void* memory) {
                 memory_order_acquire)) {
             if (expected == SECRET_SLOT_WIPING) {
                 unlock_secret_registry();
+                end_registry_update();
                 return RETURNGUARD_SECRET_BUSY;
             }
             continue;
@@ -134,11 +168,22 @@ ReturnGuardSecretResult returnguard_unregister_secret(void* memory) {
         atomic_store_explicit(
             &slot->state, SECRET_SLOT_FREE, memory_order_release);
         unlock_secret_registry();
+        end_registry_update();
         return RETURNGUARD_SECRET_OK;
     }
 
     unlock_secret_registry();
+    end_registry_update();
     return RETURNGUARD_SECRET_NOT_FOUND;
+}
+
+static void wait_for_registry_updates(void) {
+    for (unsigned spin = 0U; spin < RETURNGUARD_REGISTRY_UPDATE_SPINS; ++spin) {
+        if (atomic_load_explicit(&registry_updates, memory_order_acquire) == 0U) {
+            return;
+        }
+        atomic_signal_fence(memory_order_seq_cst);
+    }
 }
 
 static void wipe_registered_secrets(void) {
@@ -175,6 +220,7 @@ RETURNGUARD_RUNTIME_NORETURN RETURNGUARD_RUNTIME_COLD RETURNGUARD_RUNTIME_NOINLI
             FATAL_STATE_WIPING,
             memory_order_acq_rel,
             memory_order_acquire)) {
+        wait_for_registry_updates();
         wipe_registered_secrets();
         atomic_store_explicit(
             &fatal_state, FATAL_STATE_WIPED, memory_order_release);
