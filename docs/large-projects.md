@@ -26,6 +26,31 @@ The default job count is `min(CPU count, 8)`. Override it with `-j` or the
 `RETURNGUARD_JOBS` environment variable. Clang frontends can consume a lot of
 memory, so using every hardware thread is not always faster.
 
+## Reading the summary
+
+By default, the driver prints a sorted summary after the run, for example:
+
+```text
+returnguard-project: diagnostic summary: 88 finding(s) across 4 type(s)
+     33  null dereference
+     28  unchecked consumed return
+     18  partial return handling
+      9  short write or send
+```
+
+Use details mode when you want the individual findings grouped under each
+category:
+
+```sh
+returnguard-project -p build \
+    --mode=strict \
+    --summary=details \
+    --summary-limit=20
+```
+
+Set `--summary-limit=0` to show every finding, or `--summary=off` when a CI job
+only needs raw logs.
+
 ## Selecting work
 
 `.c`, `.cc`, `.cpp`, and `.cxx` files are selected by default. The driver
