@@ -168,3 +168,14 @@ add_test(
         --invalid-source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_invalid_contract.c"
         --include "${CMAKE_SOURCE_DIR}/include"
 )
+
+add_test(
+    NAME returnguard.contract_policy
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_contract_policy.py"
+        --tool "$<TARGET_FILE:returnguard>"
+        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_system_namespace.cpp"
+        --include "${CMAKE_SOURCE_DIR}/include"
+        --compiler "${CMAKE_CXX_COMPILER}"
+)
