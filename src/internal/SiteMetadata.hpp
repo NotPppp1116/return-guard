@@ -12,6 +12,7 @@ struct SiteMetadata {
     unsigned column = 0U;
     std::string function;
     std::string callee;
+    std::string callee_type;
     std::string predicate;
 };
 
