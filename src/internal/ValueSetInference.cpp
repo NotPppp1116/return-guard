@@ -37,7 +37,13 @@ std::optional<Domain> ValueSetInference::infer_expression(
         domain.finite = true;
         domain.inferred_from_body = true;
         domain.type_name = expression->getType().getAsString();
-        add_domain_value(domain, *value, "");
+        std::string label = "";
+        if (const auto* reference = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
+            if (const auto* enum_constant = llvm::dyn_cast<clang::EnumConstantDecl>(reference->getDecl())) {
+                label = enum_constant->getQualifiedNameAsString();
+            }
+        }
+        add_domain_value(domain, *value, label);
         return domain;
     }
 

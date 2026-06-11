@@ -192,6 +192,12 @@ bool is_boolean_domain(const Domain& domain) {
 
 CheckResult Analyzer::analyze_variable(const clang::CallExpr* call, const clang::VarDecl* variable,
                                        const Domain& domain) {
+    if (!variable->isLocalVarDecl()) {
+        CheckResult result;
+        result.kind = HandlingKind::Forwarded;
+        return result;
+    }
+
     const clang::FunctionDecl* function = enclosing_function(call);
     if (function == nullptr || !function->doesThisDeclarationHaveABody()) {
         return {
@@ -430,6 +436,10 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
     case HandlingKind::Forwarded:
     case HandlingKind::ExhaustivelyChecked:
         return;
+    }
+
+    if (const clang::FunctionDecl* enclosing = enclosing_function(call)) {
+        message << " in function '" << enclosing->getQualifiedNameAsString() << "'";
     }
 
     std::string note;
