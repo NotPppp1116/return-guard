@@ -4,7 +4,6 @@
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/ASTTypeTraits.h>
-#include <clang/AST/Attr.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/ParentMapContext.h>
@@ -23,47 +22,6 @@
 
 namespace returnguard::internal {
 namespace {
-
-bool is_null_contract_name(llvm::StringRef name) {
-    /* realloc needs a dedicated contract because a zero size may legally return null. */
-    return name == "malloc" || name == "calloc" || name == "aligned_alloc" ||
-           name == "fopen" || name == "freopen" || name == "fdopen" ||
-           name == "tmpfile" || name == "opendir";
-}
-
-bool is_negative_contract_name(llvm::StringRef name) {
-    /*
-     * Do not automatically instrument read/write/recv/send/accept. Their
-     * failures are context-dependent: EINTR may require retry, EAGAIN is normal
-     * for nonblocking descriptors, and successful transfers may be partial.
-     * Projects can opt those functions in with RETURNGUARD_FAILS_NEGATIVE once
-     * they have chosen an appropriate policy.
-     */
-    return name == "open" || name == "open64" || name == "creat" ||
-           name == "close" || name == "fsync" || name == "fdatasync" ||
-           name == "ftruncate" || name == "truncate" || name == "dup" ||
-           name == "dup2" || name == "dup3" || name == "socket" ||
-           name == "pipe" || name == "pipe2" || name == "printf" ||
-           name == "fprintf" || name == "sprintf" || name == "snprintf" ||
-           name == "vprintf" || name == "vfprintf" || name == "vsprintf" ||
-           name == "vsnprintf" || name == "putchar" || name == "putc" ||
-           name == "puts" || name == "fclose" || name == "fflush";
-}
-
-std::optional<llvm::StringRef>
-contract_annotation(const clang::FunctionDecl& function) {
-    for (const clang::FunctionDecl* redeclaration : function.redecls()) {
-        for (const clang::AnnotateAttr* attribute :
-             redeclaration->specific_attrs<clang::AnnotateAttr>()) {
-            const llvm::StringRef annotation = attribute->getAnnotation();
-            if (annotation == "returnguard.failure:null" ||
-                annotation == "returnguard.failure:negative") {
-                return annotation;
-            }
-        }
-    }
-    return std::nullopt;
-}
 
 std::uint64_t hash_site_key(llvm::StringRef key) {
     std::uint64_t hash = 14695981039346656037ULL;
@@ -106,7 +64,8 @@ bool Instrumentation::validate_contract(const clang::CallExpr* call,
     }
 
     const clang::FunctionDecl* callee = call->getDirectCallee();
-    const std::string function = callee == nullptr ? "<indirect>" : callee->getNameAsString();
+    const std::string function =
+        callee == nullptr ? "<indirect>" : callee->getNameAsString();
     const char* requirement = predicate == FailurePredicate::Null
                                   ? "a pointer return type"
                                   : "a signed integer return type";
@@ -130,26 +89,8 @@ bool Instrumentation::consider(const clang::CallExpr* call,
         return false;
     }
 
-    std::optional<FailurePredicate> predicate;
-    if (const std::optional<llvm::StringRef> annotation =
-            contract_annotation(*callee)) {
-        predicate = *annotation == "returnguard.failure:null"
-                        ? FailurePredicate::Null
-                        : FailurePredicate::Negative;
-    } else {
-        const clang::SourceManager& source_manager = context_.getSourceManager();
-        if (!source_manager.isInSystemHeader(callee->getLocation())) {
-            return false;
-        }
-
-        const llvm::StringRef name = callee->getName();
-        if (is_null_contract_name(name)) {
-            predicate = FailurePredicate::Null;
-        } else if (is_negative_contract_name(name)) {
-            predicate = FailurePredicate::Negative;
-        }
-    }
-
+    const std::optional<FailurePredicate> predicate =
+        failure_contract(*callee, context_.getSourceManager());
     if (!predicate.has_value() || !validate_contract(call, *predicate) ||
         !should_instrument(handling)) {
         return false;
@@ -176,8 +117,8 @@ bool Instrumentation::wrap_call(const clang::CallExpr* call,
     }
 
     clang::CharSourceRange range = clang::CharSourceRange::getTokenRange(begin, end);
-    range = clang::Lexer::makeFileCharRange(range, source_manager,
-                                            context_.getLangOpts());
+    range = clang::Lexer::makeFileCharRange(
+        range, source_manager, context_.getLangOpts());
     if (range.isInvalid()) {
         return false;
     }
@@ -219,8 +160,10 @@ Instrumentation::metadata_for_call(const clang::CallExpr* call,
     metadata.line = source_manager.getSpellingLineNumber(location);
     metadata.column = source_manager.getSpellingColumnNumber(location);
     metadata.function = enclosing_function_name(call);
-    metadata.callee = callee == nullptr ? "<indirect>" : callee->getQualifiedNameAsString();
-    metadata.predicate = predicate == FailurePredicate::Null ? "null" : "negative";
+    metadata.callee =
+        callee == nullptr ? "<indirect>" : callee->getQualifiedNameAsString();
+    metadata.predicate =
+        predicate == FailurePredicate::Null ? "null" : "negative";
 
     const std::string key = metadata.file + '\x1f' +
                             std::to_string(metadata.line) + '\x1f' +
@@ -243,7 +186,8 @@ Instrumentation::metadata_for_call(const clang::CallExpr* call,
     return metadata;
 }
 
-std::string Instrumentation::normalized_site_path(const clang::CallExpr* call) const {
+std::string
+Instrumentation::normalized_site_path(const clang::CallExpr* call) const {
     const clang::SourceManager& source_manager = context_.getSourceManager();
     const clang::SourceLocation location =
         source_manager.getFileLoc(call->getExprLoc());
@@ -254,7 +198,8 @@ std::string Instrumentation::normalized_site_path(const clang::CallExpr* call) c
 
     std::error_code error;
     if (file.is_relative()) {
-        const std::filesystem::path absolute = std::filesystem::absolute(file, error);
+        const std::filesystem::path absolute =
+            std::filesystem::absolute(file, error);
         if (!error) {
             file = absolute;
         }
@@ -265,7 +210,8 @@ std::string Instrumentation::normalized_site_path(const clang::CallExpr* call) c
         std::filesystem::path root(returnguard::options().site_root);
         error.clear();
         if (root.is_relative()) {
-            const std::filesystem::path absolute = std::filesystem::absolute(root, error);
+            const std::filesystem::path absolute =
+                std::filesystem::absolute(root, error);
             if (!error) {
                 root = absolute;
             }
@@ -281,7 +227,8 @@ std::string Instrumentation::normalized_site_path(const clang::CallExpr* call) c
     return file.generic_string();
 }
 
-std::string Instrumentation::enclosing_function_name(const clang::CallExpr* call) const {
+std::string
+Instrumentation::enclosing_function_name(const clang::CallExpr* call) const {
     clang::DynTypedNode node = clang::DynTypedNode::create(*call);
     for (unsigned depth = 0U; depth < 128U; ++depth) {
         const auto parents = context_.getParents(node);
@@ -290,7 +237,8 @@ std::string Instrumentation::enclosing_function_name(const clang::CallExpr* call
         }
 
         for (const clang::DynTypedNode& parent : parents) {
-            if (const clang::FunctionDecl* function = parent.get<clang::FunctionDecl>()) {
+            if (const clang::FunctionDecl* function =
+                    parent.get<clang::FunctionDecl>()) {
                 return function->getQualifiedNameAsString();
             }
         }
@@ -312,8 +260,8 @@ bool Instrumentation::ensure_runtime_header() {
         return false;
     }
 
-    if (rewriter_.InsertTextBefore(start,
-                                   "#include <returnguard/Runtime.h>\n")) {
+    if (rewriter_.InsertTextBefore(
+            start, "#include <returnguard/Runtime.h>\n")) {
         return false;
     }
     runtime_header_inserted_ = true;
