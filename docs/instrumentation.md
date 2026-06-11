@@ -19,7 +19,7 @@ int fd = open(path, O_RDONLY);
 is emitted as:
 
 ```c
-int fd = __RG_CHECK_NEGATIVE(open(path, O_RDONLY), 178392114u);
+int fd = __RG_CHECK_NEGATIVE(open(path, O_RDONLY), 1234567890123456789ULL);
 ```
 
 The wrapper evaluates the call once, terminates through the shared
@@ -44,16 +44,85 @@ returnguard_harden_target(my_program)
 ```
 
 `returnguard_harden_target()` attaches the installed compiler launcher for C and
-C++ sources and links `ReturnGuard::runtime`. The project's normal source tree
-remains unchanged.
+C++ sources, links `ReturnGuard::runtime`, and writes per-object metadata beneath:
 
-A custom installation prefix can be selected through `CMAKE_PREFIX_PATH`:
+```text
+<current-binary-dir>/returnguard-sites/<target>/
+```
+
+The directory is registered with CMake as additional clean output. A project can
+select explicit locations when needed:
+
+```cmake
+returnguard_harden_target(my_program
+    SITE_MAP_DIR "${CMAKE_BINARY_DIR}/security-sites/my_program"
+    SOURCE_ROOT "${PROJECT_SOURCE_DIR}")
+```
+
+`SOURCE_ROOT` controls path normalization in site IDs and metadata. It should be
+a stable project root so separate checkouts produce the same IDs. The target's
+chosen metadata directory is also stored in the custom
+`RETURNGUARD_SITE_MAP_DIR` target property.
+
+A custom ReturnGuard installation prefix can be selected through
+`CMAKE_PREFIX_PATH`:
 
 ```sh
 cmake -S . -B build-hardened \
     -DCMAKE_PREFIX_PATH=/path/to/returnguard/prefix
 cmake --build build-hardened
 ```
+
+## Site metadata
+
+Manual transformation can emit metadata alongside the generated source:
+
+```sh
+returnguard \
+    --instrument-output=/tmp/main.returnguard.c \
+    --site-map-output=/tmp/main.returnguard-sites.json \
+    --site-root="$PWD" \
+    src/main.c -- -std=c17
+```
+
+Each successfully inserted wrapper has one record:
+
+```json
+{
+  "schema_version": 1,
+  "sites": [
+    {
+      "id": "1234567890123456789",
+      "file": "src/main.c",
+      "line": 42,
+      "column": 14,
+      "function": "load_configuration",
+      "callee": "open",
+      "predicate": "negative"
+    }
+  ]
+}
+```
+
+The ID is stored as a decimal string so JSON consumers do not lose precision.
+ReturnGuard currently computes a 64-bit FNV-1a hash over the normalized file,
+line, column, enclosing function, callee, and failure predicate. A zero hash is
+reserved. Different metadata producing the same ID is a hard transformation
+error within a translation unit and a hard merge error across translation units.
+
+Per-object maps can be combined after a build:
+
+```sh
+returnguard-site-map \
+    --input-dir build/returnguard-sites/my_program \
+    --output build/my_program.returnguard-sites.json
+```
+
+The merger validates the schema, unsigned 64-bit ID range, predicate names,
+ID collisions, and inconsistent IDs assigned to the same logical site. It sorts
+records by numeric ID and replaces the combined output atomically. The requested
+output is removed before validation, so a failed merge cannot leave an older map
+looking current.
 
 ## Transparent compiler launcher
 
@@ -76,19 +145,25 @@ The launcher:
 
 1. creates a temporary transformed source beside the original source;
 2. invokes ReturnGuard with the real compilation arguments;
-3. compiles the transformed source;
-4. rewrites dependency output to name the original source;
-5. preserves original `__FILE__`, macro, diagnostic, and debug paths;
-6. removes the temporary source even when compilation fails.
+3. optionally creates a deterministic per-object site map;
+4. compiles the transformed source;
+5. rewrites dependency output to name the original source;
+6. preserves original `__FILE__`, macro, diagnostic, and debug paths;
+7. removes the temporary source even when compilation fails;
+8. removes the site map when the real compiler does not produce the object.
 
 The launcher recognizes these optional environment variables:
 
 - `RETURNGUARD_TOOL`: explicit path to the ReturnGuard executable;
 - `RETURNGUARD_INCLUDE_DIR`: directory containing `returnguard/Runtime.h`;
+- `RETURNGUARD_SITE_MAP_DIR`: directory for per-object JSON maps;
+- `RETURNGUARD_SOURCE_ROOT`: root used to normalize source paths;
 - `RETURNGUARD_DISABLE=1`: pass the compilation through unchanged.
 
-Unsupported response-file and standard-input source compilations fail closed
-rather than silently compiling an uninstrumented source.
+When `RETURNGUARD_SITE_MAP_DIR` is set, compile commands must provide an explicit
+`-o` object path. Unsupported response-file and standard-input source
+compilations fail closed rather than silently compiling an uninstrumented
+source.
 
 ## Runtime
 
@@ -108,7 +183,8 @@ hook definition:
 ```c
 #include <returnguard/Runtime.h>
 
-void __rg_fatal_hook(uint32_t site_id, int saved_errno) {
+void __rg_fatal_hook(uint64_t site_id, int saved_errno) {
+    /* Look up site_id in the merged JSON map. */
     /* Registered secret regions have already been wiped here. */
     /* Perform only minimal best-effort reporting. */
 }
@@ -193,3 +269,5 @@ policy.
   a Clang-based hardened build.
 - C and C++ compilers must support the path-remapping options used by the
   launcher; current testing targets modern GCC and Clang on Linux.
+- After changing a target's source list, clean its build outputs before treating
+  a manually merged site map as authoritative.
