@@ -162,6 +162,9 @@ Instrumentation::metadata_for_call(const clang::CallExpr* call,
     metadata.function = enclosing_function_name(call);
     metadata.callee =
         callee == nullptr ? "<indirect>" : callee->getQualifiedNameAsString();
+    metadata.callee_type = callee == nullptr
+                               ? "<unknown>"
+                               : callee->getType().getCanonicalType().getAsString();
     metadata.predicate =
         predicate == FailurePredicate::Null ? "null" : "negative";
 
@@ -169,7 +172,7 @@ Instrumentation::metadata_for_call(const clang::CallExpr* call,
                             std::to_string(metadata.line) + '\x1f' +
                             std::to_string(metadata.column) + '\x1f' +
                             metadata.function + '\x1f' + metadata.callee + '\x1f' +
-                            metadata.predicate;
+                            metadata.callee_type + '\x1f' + metadata.predicate;
     metadata.id = hash_site_key(key);
 
     const auto [existing, inserted] = known_site_ids_.emplace(metadata.id, key);
