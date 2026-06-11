@@ -97,11 +97,13 @@ add_executable(returnguard
     src/internal/ReturnCollector.cpp
     src/internal/ValueSetInference.cpp
 )
+set_target_properties(returnguard PROPERTIES EXPORT_NAME tool)
 
 add_library(returnguard_runtime STATIC
     runtime/Runtime.c
 )
 set_target_properties(returnguard_runtime PROPERTIES
+    EXPORT_NAME runtime
     C_STANDARD 11
     C_STANDARD_REQUIRED ON
     C_EXTENSIONS OFF
@@ -198,10 +200,40 @@ else()
 endif()
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+set(RETURNGUARD_CMAKE_INSTALL_DIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/ReturnGuard")
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ReturnGuardConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/ReturnGuardConfig.cmake"
+    INSTALL_DESTINATION "${RETURNGUARD_CMAKE_INSTALL_DIR}"
+    PATH_VARS
+        CMAKE_INSTALL_BINDIR
+        CMAKE_INSTALL_INCLUDEDIR
+)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/ReturnGuardConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
 install(TARGETS returnguard returnguard_runtime
+    EXPORT ReturnGuardTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(EXPORT ReturnGuardTargets
+    FILE ReturnGuardTargets.cmake
+    NAMESPACE ReturnGuard::
+    DESTINATION "${RETURNGUARD_CMAKE_INSTALL_DIR}"
+)
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/ReturnGuardConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/ReturnGuardConfigVersion.cmake"
+    DESTINATION "${RETURNGUARD_CMAKE_INSTALL_DIR}"
 )
 install(
     FILES
@@ -252,5 +284,14 @@ if(RETURNGUARD_BUILD_TESTS)
             --compiler "${CMAKE_C_COMPILER}"
             --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
             --runtime "$<TARGET_FILE:returnguard_runtime>"
+    )
+    add_test(
+        NAME returnguard.cmake_package
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cmake_package.py"
+            --cmake "${CMAKE_COMMAND}"
+            --build-dir "${CMAKE_CURRENT_BINARY_DIR}"
+            --compiler "${CMAKE_C_COMPILER}"
     )
 endif()
