@@ -19,6 +19,7 @@ SITE_FIELDS = (
     "column",
     "function",
     "callee",
+    "callee_type",
     "predicate",
 )
 
@@ -85,6 +86,10 @@ def validate_site(raw: Any, path: pathlib.Path) -> dict[str, Any]:
     if predicate not in {"null", "negative"}:
         raise SiteMapError(f"{path}: unsupported predicate {predicate!r}")
 
+    callee_type = require_string(raw, "callee_type", path)
+    if not callee_type:
+        raise SiteMapError(f"{path}: site field 'callee_type' must not be empty")
+
     return {
         "id": str(identifier),
         "file": require_string(raw, "file", path),
@@ -92,6 +97,7 @@ def validate_site(raw: Any, path: pathlib.Path) -> dict[str, Any]:
         "column": require_nonnegative_integer(raw, "column", path),
         "function": require_string(raw, "function", path),
         "callee": require_string(raw, "callee", path),
+        "callee_type": callee_type,
         "predicate": predicate,
     }
 
