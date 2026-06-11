@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <returnguard/Contracts.h>
+
+void* malloc(size_t size) RETURNGUARD_FAILS_NULL;
+
 int consume_fd(int fd);
 
 int instrumentation_sample(const char* path, size_t size) {
