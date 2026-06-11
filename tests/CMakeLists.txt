@@ -179,3 +179,15 @@ add_test(
         --include "${CMAKE_SOURCE_DIR}/include"
         --compiler "${CMAKE_CXX_COMPILER}"
 )
+
+add_test(
+    NAME returnguard.readonly_launcher
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_readonly_launcher.py"
+        --launcher "${CMAKE_SOURCE_DIR}/scripts/returnguard_compiler_launcher.py"
+        --tool "$<TARGET_FILE:returnguard>"
+        --compiler "${CMAKE_C_COMPILER}"
+        --include "${CMAKE_SOURCE_DIR}/include"
+        --runtime "$<TARGET_FILE:returnguard_runtime>"
+)
