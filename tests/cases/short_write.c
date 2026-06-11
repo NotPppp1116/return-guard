@@ -49,6 +49,15 @@ int assignment_condition_write_negative_only(int fd, const char* buffer, size_t 
     return (int)written;
 }
 
+int conditional_write_negative_only(int fd, const char* buffer, size_t size) {
+    return write(fd, buffer, size) < 0 ? -1 : 0;
+}
+
+int conditional_assignment_write_negative_only(int fd, const char* buffer, size_t size) {
+    ssize_t written;
+    return (written = write(fd, buffer, size)) < 0 ? -1 : (int)written;
+}
+
 int count_checked_write(int fd, const char* buffer, size_t size) {
     if (write(fd, buffer, size) != (ssize_t)size) {
         return -1;
@@ -70,4 +79,13 @@ int count_checked_assignment_condition(int fd, const char* buffer, size_t size) 
         return -1;
     }
     return 0;
+}
+
+int count_checked_conditional(int fd, const char* buffer, size_t size) {
+    return write(fd, buffer, size) == (ssize_t)size ? 0 : -1;
+}
+
+int count_checked_assignment_conditional(int fd, const char* buffer, size_t size) {
+    ssize_t written;
+    return (written = write(fd, buffer, size)) == (ssize_t)size ? 0 : -1;
 }

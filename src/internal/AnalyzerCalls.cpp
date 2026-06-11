@@ -679,7 +679,11 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
         return analyze_direct_condition(condition, call, domain, *this);
     }
 
-    if (enclosing_direct_conditional_condition(call) != nullptr) {
+    if (const clang::Expr* condition = enclosing_direct_conditional_condition(call)) {
+        if (std::optional<CheckResult> byte_count =
+                analyze_byte_count_condition(call, nullptr, condition, nullptr, *this)) {
+            return *byte_count;
+        }
         return exhaustive_result();
     }
 
@@ -710,7 +714,12 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
     }
 
     if (const clang::VarDecl* variable = variable_assigned_from_call(call)) {
-        if (enclosing_assignment_conditional_condition(call, variable) != nullptr) {
+        if (const clang::Expr* condition =
+                enclosing_assignment_conditional_condition(call, variable)) {
+            if (std::optional<CheckResult> byte_count =
+                    analyze_byte_count_condition(call, variable, condition, nullptr, *this)) {
+                return *byte_count;
+            }
             return exhaustive_result();
         }
         if (const clang::Expr* condition = enclosing_assignment_condition(call, variable)) {

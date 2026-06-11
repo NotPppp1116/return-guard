@@ -285,7 +285,7 @@ class ProjectRunnerTests(unittest.TestCase):
             self.assertIn("3/3 translation units", completed.stderr)
             self.assertIn("1 failed", completed.stderr)
 
-    def test_diagnostic_summary_is_grouped_and_sorted(self) -> None:
+    def test_diagnostic_summary_counts_are_grouped_and_sorted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             build = self.make_database(root, ["alpha.c", "beta.c"])
@@ -313,7 +313,10 @@ class ProjectRunnerTests(unittest.TestCase):
                 "0",
             )
 
-            self.assertIn("diagnostic summary by type", completed.stderr)
+            self.assertIn(
+                "diagnostic summary: 3 finding(s) across 2 type(s)",
+                completed.stderr,
+            )
             short_line = "      2  short write or send"
             consumed_line = "      1  unchecked consumed return"
             self.assertIn(short_line, completed.stderr)
@@ -322,6 +325,48 @@ class ProjectRunnerTests(unittest.TestCase):
                 completed.stderr.index(short_line),
                 completed.stderr.index(consumed_line),
             )
+            self.assertNotIn("alpha.c:1:1: possible short write", completed.stderr)
+
+    def test_diagnostic_summary_details_include_limited_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            build = self.make_database(root, ["alpha.c", "beta.c"])
+            tool = root / "diagnostic-returnguard.py"
+            tool.write_text(
+                "#!/usr/bin/env python3\n"
+                "import pathlib\n"
+                "import sys\n"
+                "source = pathlib.Path(sys.argv[-1])\n"
+                "if source.name == 'alpha.c':\n"
+                "    print(f'{source}:1:1: warning: returnguard: possible short write from \\'write\\': positive return may be smaller than requested byte count')\n"
+                "    print(f'{source}:2:3: warning: returnguard: return value of \\'open\\' is consumed but not verified')\n"
+                "else:\n"
+                "    print(f'{source}:4:5: warning: returnguard: possible short write from \\'send\\': positive return may be smaller than requested byte count')\n",
+                encoding="utf-8",
+            )
+            tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+
+            completed = self.run_runner(
+                "-p",
+                str(build),
+                "--tool",
+                str(tool),
+                "--progress-every",
+                "0",
+                "--summary=details",
+                "--summary-limit",
+                "1",
+            )
+
+            self.assertIn(
+                "diagnostic summary: 3 finding(s) across 2 type(s)",
+                completed.stderr,
+            )
+            self.assertIn("      2  short write or send", completed.stderr)
+            self.assertIn("alpha.c:1:1: possible short write", completed.stderr)
+            self.assertIn("... 1 more short write or send finding(s)", completed.stderr)
+            self.assertIn("      1  unchecked consumed return", completed.stderr)
+            self.assertIn("alpha.c:2:3: return value of 'open'", completed.stderr)
 
     def test_include_exclude_and_shards_are_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

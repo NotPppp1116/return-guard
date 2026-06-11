@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from collections import defaultdict
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -48,12 +50,31 @@ DEFAULT_SCAN_EXCLUDED_DIRS = frozenset(
 )
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 RETURNGUARD_DIAGNOSTIC_RE = re.compile(
-    r"\b(?:warning|error): returnguard(?: safety)?: (?P<message>.*)"
+    r"^(?P<path>.*?):(?P<line>\d+):(?P<column>\d+): "
+    r"(?P<severity>warning|error): returnguard(?: safety)?: (?P<message>.*)"
+)
+RETURNGUARD_DIAGNOSTIC_FALLBACK_RE = re.compile(
+    r"\b(?P<severity>warning|error): returnguard(?: safety)?: (?P<message>.*)"
 )
 
 
 class RunnerError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class DiagnosticFinding:
+    kind: str
+    severity: str
+    message: str
+    path: str | None = None
+    line: int | None = None
+    column: int | None = None
+
+    def location(self) -> str:
+        if self.path is None or self.line is None or self.column is None:
+            return "<unknown>"
+        return f"{self.path}:{self.line}:{self.column}"
 
 
 def strip_ansi(text: str) -> str:
@@ -65,15 +86,17 @@ def diagnostic_type(message: str) -> str:
     if message.startswith("possible short write"):
         return "short write or send"
     if "potentially-null return value" in message or "prior null check" in message:
-        return "nullable pointer"
+        return "null dereference"
     if "out-of-bounds" in message or "array index" in message:
-        return "bounds"
+        return "out-of-bounds access"
     if "use of memory after it was freed" in message:
         return "use after free"
     if "potential double free" in message:
         return "double free"
     if "address of stack-allocated variable returned" in message:
-        return "lifetime"
+        return "invalid lifetime"
+    if "shift amount" in message:
+        return "invalid shift"
     if "signed left shift" in message:
         return "integer overflow"
     if "consumed but not verified" in message:
@@ -85,27 +108,88 @@ def diagnostic_type(message: str) -> str:
     return "other"
 
 
-def diagnostics_in_output(path: pathlib.Path) -> Counter[str]:
-    counts: Counter[str] = Counter()
+def diagnostic_from_line(raw_line: str) -> DiagnosticFinding | None:
+    line = strip_ansi(raw_line).strip()
+    match = RETURNGUARD_DIAGNOSTIC_RE.search(line)
+    if match is not None:
+        message = match.group("message")
+        return DiagnosticFinding(
+            kind=diagnostic_type(message),
+            severity=match.group("severity"),
+            message=message,
+            path=match.group("path"),
+            line=int(match.group("line")),
+            column=int(match.group("column")),
+        )
+
+    match = RETURNGUARD_DIAGNOSTIC_FALLBACK_RE.search(line)
+    if match is None:
+        return None
+
+    message = match.group("message")
+    return DiagnosticFinding(
+        kind=diagnostic_type(message),
+        severity=match.group("severity"),
+        message=message,
+    )
+
+
+def diagnostics_in_output(path: pathlib.Path) -> list[DiagnosticFinding]:
+    findings: list[DiagnosticFinding] = []
     try:
         with path.open("r", encoding="utf-8", errors="replace") as output:
             for raw_line in output:
-                line = strip_ansi(raw_line)
-                match = RETURNGUARD_DIAGNOSTIC_RE.search(line)
-                if match is None:
-                    continue
-                counts[diagnostic_type(match.group("message"))] += 1
+                if finding := diagnostic_from_line(raw_line):
+                    findings.append(finding)
     except FileNotFoundError:
         pass
-    return counts
+    return findings
 
 
-def print_diagnostic_summary(counts: Counter[str]) -> None:
+def print_diagnostic_summary(
+    findings: Sequence[DiagnosticFinding],
+    *,
+    mode: str,
+    limit: int,
+) -> None:
+    counts = Counter(finding.kind for finding in findings)
+    total = sum(counts.values())
+    print(
+        "returnguard-project: diagnostic summary: "
+        f"{total} finding(s) across {len(counts)} type(s)",
+        file=sys.stderr,
+    )
     if not counts:
         return
-    print("returnguard-project: diagnostic summary by type:", file=sys.stderr)
+
+    grouped: dict[str, list[DiagnosticFinding]] = defaultdict(list)
+    for finding in findings:
+        grouped[finding.kind].append(finding)
+
     for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
         print(f"  {count:5d}  {name}", file=sys.stderr)
+        if mode != "details":
+            continue
+
+        examples = sorted(
+            grouped[name],
+            key=lambda finding: (
+                finding.path or "",
+                finding.line if finding.line is not None else -1,
+                finding.column if finding.column is not None else -1,
+                finding.message,
+            ),
+        )
+        shown = examples if limit == 0 else examples[:limit]
+        for finding in shown:
+            print(f"         {finding.location()}: {finding.message}", file=sys.stderr)
+        remaining = len(examples) - len(shown)
+        if remaining > 0:
+            print(
+                f"         ... {remaining} more {name} finding(s); "
+                "use --summary-limit=0 to show all",
+                file=sys.stderr,
+            )
 
 
 def default_jobs() -> int:
@@ -430,6 +514,21 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not print the grouped diagnostic summary",
     )
+    result.add_argument(
+        "--summary",
+        choices=("off", "counts", "details"),
+        default="counts",
+        help=(
+            "summary output: off, counts by diagnostic type, or details with "
+            "individual findings (default: counts)"
+        ),
+    )
+    result.add_argument(
+        "--summary-limit",
+        type=int,
+        default=10,
+        help="maximum individual findings per type in --summary=details; 0 shows all",
+    )
     result.add_argument("--list-files", action="store_true")
     result.add_argument("--dry-run", action="store_true")
     result.add_argument("--verbose", action="store_true")
@@ -484,6 +583,8 @@ def validate_arguments(arguments: argparse.Namespace) -> int:
         raise RunnerError("--timeout must be greater than zero")
     if arguments.no_stream_output and arguments.log_dir is None:
         raise RunnerError("--no-stream-output requires --log-dir")
+    if arguments.summary_limit < 0:
+        raise RunnerError("--summary-limit cannot be negative")
     return jobs
 
 
@@ -585,7 +686,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         failed_count = 0
         timed_out_count = 0
         internal_error_count = 0
-        diagnostic_summary: Counter[str] = Counter()
+        summary_mode = "off" if arguments.no_summary else arguments.summary
+        diagnostic_findings: list[DiagnosticFinding] = []
         stop_event = threading.Event()
 
         with tempfile.TemporaryDirectory(prefix="returnguard-project-") as temporary:
@@ -651,10 +753,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         ),
                         stream_output=not arguments.no_stream_output,
                     )
-                    if not arguments.no_summary:
-                        diagnostic_summary.update(
-                            diagnostics_in_output(run_result.output_path)
-                        )
+                    if summary_mode != "off":
+                        diagnostic_findings.extend(diagnostics_in_output(run_result.output_path))
 
                     if (
                         arguments.progress_every > 0
@@ -672,8 +772,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         elapsed = time.monotonic() - started
         stopped_early = completed_count < len(selected)
-        if not arguments.no_summary:
-            print_diagnostic_summary(diagnostic_summary)
+        if summary_mode != "off":
+            print_diagnostic_summary(
+                diagnostic_findings,
+                mode=summary_mode,
+                limit=arguments.summary_limit,
+            )
         print(
             "returnguard-project: "
             f"analyzed {completed_count}/{len(selected)} translation units "
