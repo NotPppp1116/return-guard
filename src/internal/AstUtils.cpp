@@ -23,6 +23,13 @@ const clang::Expr* strip_expr(const clang::Expr* expression) {
     return expression == nullptr ? nullptr : expression->IgnoreParenImpCasts();
 }
 
+bool has_identifier_name(const clang::NamedDecl* declaration, llvm::StringRef name) {
+    if (declaration == nullptr || declaration->getIdentifier() == nullptr) {
+        return false;
+    }
+    return declaration->getName() == name;
+}
+
 std::optional<llvm::APSInt> evaluate_integer(const clang::Expr* expression,
                                              const clang::ASTContext& context) {
     if (expression == nullptr || expression->isValueDependent()) {

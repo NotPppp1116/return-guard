@@ -225,7 +225,7 @@ class Transfer final {
 
     void propagate_memcpy_pointer_copy(const clang::CallExpr* call) {
         const clang::FunctionDecl* callee = call->getDirectCallee();
-        if (callee == nullptr || callee->getName() != "memcpy" || call->getNumArgs() < 2) {
+        if (!has_identifier_name(callee, "memcpy") || call->getNumArgs() < 2) {
             return;
         }
 

@@ -31,6 +31,18 @@ void checked_by_helper(void) {
     exhaustive_status_helper(status);
 }
 
+struct status_record {
+    int status;
+};
+
+void checked_through_member(void) {
+    struct status_record record;
+    record.status = annotated_status();
+    if (record.status == 1 || record.status == 4 || record.status == 32) {
+        return;
+    }
+}
+
 void helper_with_unreachable_check_does_not_count(void) {
     int status = annotated_status();
     unreachable_status_helper(status);

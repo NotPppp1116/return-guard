@@ -31,3 +31,21 @@ int cpp_uaf_delete() {
     delete ptr;
     return *ptr;
 }
+
+struct Callable {
+    int operator()(int value) const { return value + 1; }
+};
+
+int cpp_safety_ignores_non_identifier_callees() {
+    Callable callable;
+    return callable(41);
+}
+
+struct ShiftSink {};
+
+ShiftSink operator<<(ShiftSink sink, int) { return sink; }
+
+void cpp_safety_ignores_overloaded_shift() {
+    ShiftSink sink;
+    (void)(sink << 8);
+}

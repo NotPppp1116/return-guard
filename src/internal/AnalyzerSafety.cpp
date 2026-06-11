@@ -165,8 +165,8 @@ bool is_allocation_call(const clang::CallExpr* call) {
     if (callee == nullptr) {
         return false;
     }
-    const llvm::StringRef name = callee->getName();
-    return name == "malloc" || name == "calloc" || name == "aligned_alloc";
+    return has_identifier_name(callee, "malloc") || has_identifier_name(callee, "calloc") ||
+           has_identifier_name(callee, "aligned_alloc");
 }
 
 bool returns_pointer(const clang::Expr* expression) {
@@ -183,13 +183,12 @@ bool is_deallocation_call(const clang::CallExpr* call) {
     if (callee == nullptr) {
         return false;
     }
-    const llvm::StringRef name = callee->getName();
-    return name == "free" || name == "realloc";
+    return has_identifier_name(callee, "free") || has_identifier_name(callee, "realloc");
 }
 
 bool is_realloc_call(const clang::CallExpr* call) {
     const clang::FunctionDecl* callee = call == nullptr ? nullptr : call->getDirectCallee();
-    return callee != nullptr && callee->getName() == "realloc";
+    return has_identifier_name(callee, "realloc");
 }
 
 class LifetimeTransfer final {
@@ -412,7 +411,7 @@ class LifetimeTransfer final {
 
     void propagate_memcpy_pointer_copy(const clang::CallExpr* call) {
         const clang::FunctionDecl* callee = call->getDirectCallee();
-        if (callee == nullptr || callee->getName() != "memcpy" || call->getNumArgs() < 2) {
+        if (!has_identifier_name(callee, "memcpy") || call->getNumArgs() < 2) {
             return;
         }
         const clang::ValueDecl* destination = address_of_lvalue(call->getArg(0));
@@ -584,14 +583,15 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
             if (const clang::Expr* lhs = binary->getLHS()) {
                 if (const clang::Expr* rhs = binary->getRHS()) {
                     auto rhs_val = evaluate_integer(rhs, context_);
-                    if (rhs_val.has_value()) {
+                    const clang::QualType lhs_type = lhs->getType();
+                    if (rhs_val.has_value() && !lhs_type.isNull() && lhs_type->isIntegerType()) {
                         const unsigned long long shift_amount = rhs_val->getZExtValue();
-                        const unsigned long long width = context_.getTypeSize(lhs->getType());
+                        const unsigned long long width = context_.getTypeSize(lhs_type);
                         if (shift_amount >= width) {
                             emit_shift_overflow_warning(binary, shift_amount, width);
                         }
                         if (binary->getOpcode() == clang::BO_Shl &&
-                            lhs->getType()->isSignedIntegerType() && shift_amount < width) {
+                            lhs_type->isSignedIntegerType() && shift_amount < width) {
                             auto lhs_val = evaluate_integer(lhs, context_);
                             if (lhs_val.has_value() && !lhs_val->isNegative()) {
                                 const llvm::APInt shifted =

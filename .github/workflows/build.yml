@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        llvm-version: [18]
+        llvm-version: [22]
 
     steps:
       - uses: actions/checkout@v5

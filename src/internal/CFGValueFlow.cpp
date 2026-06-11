@@ -10,8 +10,10 @@
 #include <clang/Analysis/CFG.h>
 #include <llvm/Support/Casting.h>
 
+#include <cstdint>
 #include <deque>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -28,8 +30,44 @@ enum class Origin {
 
 Origin join_origin(Origin lhs, Origin rhs) { return lhs == rhs ? lhs : Origin::Maybe; }
 
+struct StorageLocation {
+    std::string key;
+    bool pointer_like = false;
+
+    bool operator==(const StorageLocation& other) const { return key == other.key; }
+};
+
+struct StorageLocationHash {
+    std::size_t operator()(const StorageLocation& location) const {
+        return std::hash<std::string>{}(location.key);
+    }
+};
+
+using StorageSet = std::unordered_set<StorageLocation, StorageLocationHash>;
+
+StorageLocation declaration_location(const clang::ValueDecl& declaration) {
+    return {
+        .key = "decl:" + std::to_string(reinterpret_cast<std::uintptr_t>(&declaration)),
+        .pointer_like = declaration.getType()->isPointerType(),
+    };
+}
+
+StorageLocation append_component(StorageLocation base, const clang::ValueDecl& component,
+                                 bool pointer_like) {
+    base.key += ".decl:";
+    base.key += std::to_string(reinterpret_cast<std::uintptr_t>(&component));
+    base.pointer_like = pointer_like;
+    return base;
+}
+
+StorageLocation append_array_element(StorageLocation base, bool pointer_like) {
+    base.key += "[]";
+    base.pointer_like = pointer_like;
+    return base;
+}
+
 struct PointsTo {
-    std::unordered_set<const clang::ValueDecl*> targets;
+    StorageSet targets;
     bool unknown = false;
 
     bool operator==(const PointsTo&) const = default;
@@ -44,67 +82,67 @@ struct PointsTo {
 };
 
 struct State {
-    std::unordered_map<const clang::ValueDecl*, Origin> values;
-    std::unordered_map<const clang::ValueDecl*, PointsTo> pointers;
+    std::unordered_map<StorageLocation, Origin, StorageLocationHash> values;
+    std::unordered_map<StorageLocation, PointsTo, StorageLocationHash> pointers;
 
     bool operator==(const State&) const = default;
 
-    [[nodiscard]] Origin value(const clang::ValueDecl* declaration) const {
-        const auto iterator = values.find(declaration);
+    [[nodiscard]] Origin value(const StorageLocation& location) const {
+        const auto iterator = values.find(location);
         return iterator == values.end() ? Origin::No : iterator->second;
     }
 
-    [[nodiscard]] PointsTo pointer(const clang::ValueDecl* declaration) const {
-        const auto iterator = pointers.find(declaration);
+    [[nodiscard]] PointsTo pointer(const StorageLocation& location) const {
+        const auto iterator = pointers.find(location);
         if (iterator != pointers.end()) {
             return iterator->second;
         }
         return {
             .targets = {},
-            .unknown = declaration != nullptr && declaration->getType()->isPointerType(),
+            .unknown = location.pointer_like,
         };
     }
 
     bool join(const State& other) {
         bool changed = false;
 
-        std::unordered_set<const clang::ValueDecl*> value_declarations;
-        for (const auto& [declaration, unused] : values) {
+        StorageSet value_locations;
+        for (const auto& [location, unused] : values) {
             (void)unused;
-            value_declarations.insert(declaration);
+            value_locations.insert(location);
         }
-        for (const auto& [declaration, unused] : other.values) {
+        for (const auto& [location, unused] : other.values) {
             (void)unused;
-            value_declarations.insert(declaration);
+            value_locations.insert(location);
         }
 
-        for (const clang::ValueDecl* declaration : value_declarations) {
-            const Origin old = value(declaration);
-            const Origin merged = join_origin(old, other.value(declaration));
+        for (const StorageLocation& location : value_locations) {
+            const Origin old = value(location);
+            const Origin merged = join_origin(old, other.value(location));
             changed = changed || old != merged;
             if (merged == Origin::No) {
-                values.erase(declaration);
+                values.erase(location);
             } else {
-                values[declaration] = merged;
+                values[location] = merged;
             }
         }
 
-        std::unordered_set<const clang::ValueDecl*> pointer_declarations;
-        for (const auto& [declaration, unused] : pointers) {
+        StorageSet pointer_locations;
+        for (const auto& [location, unused] : pointers) {
             (void)unused;
-            pointer_declarations.insert(declaration);
+            pointer_locations.insert(location);
         }
-        for (const auto& [declaration, unused] : other.pointers) {
+        for (const auto& [location, unused] : other.pointers) {
             (void)unused;
-            pointer_declarations.insert(declaration);
+            pointer_locations.insert(location);
         }
 
-        for (const clang::ValueDecl* declaration : pointer_declarations) {
-            const PointsTo old = pointer(declaration);
+        for (const StorageLocation& location : pointer_locations) {
+            const PointsTo old = pointer(location);
             PointsTo merged = old;
-            merged.join(other.pointer(declaration));
+            merged.join(other.pointer(location));
             changed = changed || merged != old;
-            pointers[declaration] = std::move(merged);
+            pointers[location] = std::move(merged);
         }
         return changed;
     }
@@ -113,24 +151,22 @@ struct State {
 struct Evaluation {
     Origin origin = Origin::No;
     PointsTo pointer;
-    std::unordered_set<const clang::ValueDecl*> locations;
+    StorageSet locations;
     bool unknown_location = false;
 };
 
-Origin read_origin(const State& state,
-                   const std::unordered_set<const clang::ValueDecl*>& locations) {
+Origin read_origin(const State& state, const StorageSet& locations) {
     std::optional<Origin> result;
-    for (const clang::ValueDecl* location : locations) {
+    for (const StorageLocation& location : locations) {
         result = result.has_value() ? join_origin(*result, state.value(location))
                                     : state.value(location);
     }
     return result.value_or(Origin::No);
 }
 
-PointsTo read_pointer(const State& state,
-                      const std::unordered_set<const clang::ValueDecl*>& locations) {
+PointsTo read_pointer(const State& state, const StorageSet& locations) {
     PointsTo result;
-    for (const clang::ValueDecl* location : locations) {
+    for (const StorageLocation& location : locations) {
         result.join(state.pointer(location));
     }
     return result;
@@ -217,10 +253,53 @@ class Evaluator final {
             if (declaration == nullptr) {
                 return {};
             }
+            const StorageLocation location = declaration_location(*declaration);
             Evaluation result;
-            result.origin = state_.value(declaration);
-            result.pointer = state_.pointer(declaration);
-            result.locations.insert(declaration);
+            result.origin = state_.value(location);
+            result.pointer = state_.pointer(location);
+            result.locations.insert(location);
+            return result;
+        }
+
+        if (const auto* member = llvm::dyn_cast<clang::MemberExpr>(expression)) {
+            const clang::ValueDecl* declaration = member->getMemberDecl();
+            if (declaration == nullptr) {
+                evaluate(member->getBase());
+                return {};
+            }
+
+            Evaluation base = evaluate(member->getBase());
+            Evaluation result;
+            result.unknown_location = base.unknown_location;
+            if (!base.unknown_location) {
+                for (const StorageLocation& location : base.locations) {
+                    result.locations.insert(append_component(location, *declaration,
+                                                             member->getType()->isPointerType()));
+                }
+            }
+            result.origin =
+                result.unknown_location ? Origin::Maybe : read_origin(state_, result.locations);
+            result.pointer = read_pointer(state_, result.locations);
+            result.pointer.unknown = result.pointer.unknown || result.unknown_location;
+            return result;
+        }
+
+        if (const auto* subscript = llvm::dyn_cast<clang::ArraySubscriptExpr>(expression)) {
+            Evaluation base = evaluate(subscript->getBase());
+            evaluate(subscript->getIdx());
+
+            Evaluation result;
+            result.unknown_location = base.unknown_location;
+            if (!base.unknown_location) {
+                for (const StorageLocation& location : base.locations) {
+                    result.locations.insert(
+                        append_array_element(location, subscript->getType()->isPointerType()));
+                }
+            }
+            result.origin =
+                result.unknown_location ? Origin::Maybe : read_origin(state_, result.locations);
+            result.pointer = read_pointer(state_, result.locations);
+            result.pointer.unknown = result.pointer.unknown || result.unknown_location;
             return result;
         }
 
@@ -252,7 +331,7 @@ class Evaluator final {
             case clang::UO_PreDec:
             case clang::UO_PostInc:
             case clang::UO_PostDec:
-                for (const clang::ValueDecl* location : operand.locations) {
+                for (const StorageLocation& location : operand.locations) {
                     state_.values.erase(location);
                 }
                 return {};
@@ -321,20 +400,19 @@ class Evaluator final {
     }
 
     void write(const clang::ValueDecl& declaration, const Evaluation& value) {
-        const std::unordered_set<const clang::ValueDecl*> locations = {&declaration};
+        const StorageSet locations = {declaration_location(declaration)};
         write(locations, value);
     }
 
-    void write(const std::unordered_set<const clang::ValueDecl*>& locations,
-               const Evaluation& value) {
-        for (const clang::ValueDecl* location : locations) {
+    void write(const StorageSet& locations, const Evaluation& value) {
+        for (const StorageLocation& location : locations) {
             if (value.origin == Origin::No) {
                 state_.values.erase(location);
             } else {
                 state_.values[location] = value.origin;
             }
 
-            if (location->getType()->isPointerType()) {
+            if (location.pointer_like) {
                 state_.pointers[location] = value.pointer;
             } else {
                 state_.pointers.erase(location);
@@ -443,7 +521,7 @@ ExpressionSet CFGValueFlow::aliases_for(const clang::ValueDecl& declaration) con
     std::deque<const clang::CFGBlock*> worklist;
 
     State entry_state;
-    entry_state.values[&declaration] = Origin::Yes;
+    entry_state.values[declaration_location(declaration)] = Origin::Yes;
 
     const clang::CFGBlock& entry = cfg_->getEntry();
     inputs[entry.getBlockID()] = std::move(entry_state);

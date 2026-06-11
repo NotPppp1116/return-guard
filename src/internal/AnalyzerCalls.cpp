@@ -27,7 +27,11 @@ CheckResult exhaustive_result() {
     return result;
 }
 
-bool is_commonly_ignored_system_function(llvm::StringRef name) {
+bool is_commonly_ignored_system_function(const clang::FunctionDecl* function) {
+    if (function == nullptr || function->getIdentifier() == nullptr) {
+        return false;
+    }
+    const llvm::StringRef name = function->getName();
     static const std::unordered_set<std::string> ignored_names = {
         "printf",    "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf", "vsprintf",
         "vsnprintf", "memcpy",  "memmove", "memset",   "strcpy",  "strncpy",  "strcat",
@@ -213,7 +217,7 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
 
     if (const clang::FunctionDecl* callee = call->getDirectCallee()) {
         if (source_manager_.isInSystemHeader(callee->getLocation()) &&
-            is_commonly_ignored_system_function(callee->getName())) {
+            is_commonly_ignored_system_function(callee)) {
             return;
         }
     }
