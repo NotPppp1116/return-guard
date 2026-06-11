@@ -16,24 +16,29 @@ namespace returnguard::internal {
 namespace {
 
 bool is_null_contract_name(llvm::StringRef name) {
-    return name == "malloc" || name == "calloc" || name == "realloc" ||
-           name == "aligned_alloc" || name == "fopen" || name == "freopen" ||
-           name == "fdopen" || name == "tmpfile" || name == "opendir";
+    /* realloc needs a dedicated contract because a zero size may legally return null. */
+    return name == "malloc" || name == "calloc" || name == "aligned_alloc" ||
+           name == "fopen" || name == "freopen" || name == "fdopen" ||
+           name == "tmpfile" || name == "opendir";
 }
 
 bool is_negative_contract_name(llvm::StringRef name) {
+    /*
+     * Do not automatically instrument read/write/recv/send/accept. Their
+     * failures are context-dependent: EINTR may require retry, EAGAIN is normal
+     * for nonblocking descriptors, and successful transfers may be partial.
+     * Projects can opt those functions in with RETURNGUARD_FAILS_NEGATIVE once
+     * they have chosen an appropriate policy.
+     */
     return name == "open" || name == "open64" || name == "creat" ||
            name == "close" || name == "fsync" || name == "fdatasync" ||
            name == "ftruncate" || name == "truncate" || name == "dup" ||
            name == "dup2" || name == "dup3" || name == "socket" ||
-           name == "accept" || name == "accept4" || name == "pipe" ||
-           name == "pipe2" || name == "read" || name == "write" ||
-           name == "pread" || name == "pwrite" || name == "recv" ||
-           name == "send" || name == "printf" || name == "fprintf" ||
-           name == "sprintf" || name == "snprintf" || name == "vprintf" ||
-           name == "vfprintf" || name == "vsprintf" || name == "vsnprintf" ||
-           name == "putchar" || name == "putc" || name == "puts" ||
-           name == "fclose" || name == "fflush";
+           name == "pipe" || name == "pipe2" || name == "printf" ||
+           name == "fprintf" || name == "sprintf" || name == "snprintf" ||
+           name == "vprintf" || name == "vfprintf" || name == "vsprintf" ||
+           name == "vsnprintf" || name == "putchar" || name == "putc" ||
+           name == "puts" || name == "fclose" || name == "fflush";
 }
 
 std::optional<llvm::StringRef>
