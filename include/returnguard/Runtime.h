@@ -29,6 +29,14 @@
 #define RETURNGUARD_RUNTIME_WEAK
 #endif
 
+#if defined(__cplusplus) && __cplusplus >= 201703L
+#define RETURNGUARD_RUNTIME_NODISCARD [[nodiscard]]
+#elif defined(__GNUC__) || defined(__clang__)
+#define RETURNGUARD_RUNTIME_NODISCARD __attribute__((warn_unused_result))
+#else
+#define RETURNGUARD_RUNTIME_NODISCARD
+#endif
+
 #if defined(__cplusplus)
 #define RETURNGUARD_RUNTIME_NOEXCEPT noexcept
 extern "C" {
@@ -51,10 +59,10 @@ typedef enum ReturnGuardSecretResult {
  * region is freed or otherwise becomes invalid. The registry has fixed
  * capacity and never allocates.
  */
-ReturnGuardSecretResult returnguard_register_secret(void* memory, size_t size)
-    RETURNGUARD_RUNTIME_NOEXCEPT;
-ReturnGuardSecretResult returnguard_unregister_secret(void* memory)
-    RETURNGUARD_RUNTIME_NOEXCEPT;
+RETURNGUARD_RUNTIME_NODISCARD ReturnGuardSecretResult
+returnguard_register_secret(void* memory, size_t size) RETURNGUARD_RUNTIME_NOEXCEPT;
+RETURNGUARD_RUNTIME_NODISCARD ReturnGuardSecretResult
+returnguard_unregister_secret(void* memory) RETURNGUARD_RUNTIME_NOEXCEPT;
 
 RETURNGUARD_RUNTIME_NORETURN RETURNGUARD_RUNTIME_COLD RETURNGUARD_RUNTIME_NOINLINE
     RETURNGUARD_RUNTIME_HIDDEN void
