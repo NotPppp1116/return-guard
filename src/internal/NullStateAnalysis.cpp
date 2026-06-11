@@ -12,8 +12,10 @@
 #include <llvm/Support/Casting.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <deque>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>

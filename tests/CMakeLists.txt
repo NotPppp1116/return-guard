@@ -131,7 +131,7 @@ add_returnguard_test(
     returnguard.complex_shift_overflow complex_shift_overflow.c practical 1
     "signed left shift")
 add_returnguard_test(
-    returnguard.null_state null_state.c practical 10
+    returnguard.null_state null_state.c practical 11
     "is dereferenced without a prior null check"
     --expect "pointer returned here is marked nullable")
 add_returnguard_test(

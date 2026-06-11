@@ -43,9 +43,42 @@ PointerFact join_fact(PointerFact lhs, PointerFact rhs) {
     };
 }
 
+std::optional<std::string> stable_lvalue_key(const clang::Expr* expression) {
+    expression = strip_expr(expression);
+    if (expression == nullptr) {
+        return std::nullopt;
+    }
+
+    if (const auto* reference = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
+        const auto* declaration = llvm::dyn_cast<clang::ValueDecl>(reference->getDecl());
+        if (declaration == nullptr) {
+            return std::nullopt;
+        }
+        return "decl:" + std::to_string(reinterpret_cast<std::uintptr_t>(declaration));
+    }
+
+    if (const auto* member = llvm::dyn_cast<clang::MemberExpr>(expression)) {
+        if (member->isArrow()) {
+            return std::nullopt;
+        }
+
+        std::optional<std::string> base = stable_lvalue_key(member->getBase());
+        if (!base.has_value()) {
+            return std::nullopt;
+        }
+
+        *base += ".member:";
+        *base += std::to_string(reinterpret_cast<std::uintptr_t>(member->getMemberDecl()));
+        return base;
+    }
+
+    return std::nullopt;
+}
+
 struct State {
     std::unordered_map<const clang::ValueDecl*, PointerFact> values;
     std::unordered_map<const clang::Expr*, PointerFact> expr_values;
+    std::unordered_map<std::string, PointerFact> stable_values;
     const clang::ValueDecl* refinement_subject = nullptr;
     const clang::Expr* refinement_expr_subject = nullptr;
 
@@ -60,7 +93,15 @@ struct State {
         expression = strip_expr(expression);
         if (expression == nullptr) return {};
         const auto iterator = expr_values.find(expression);
-        return iterator == expr_values.end() ? PointerFact{} : iterator->second;
+        if (iterator != expr_values.end()) {
+            return iterator->second;
+        }
+        const std::optional<std::string> key = stable_lvalue_key(expression);
+        if (!key.has_value()) {
+            return {};
+        }
+        const auto stable_iterator = stable_values.find(*key);
+        return stable_iterator == stable_values.end() ? PointerFact{} : stable_iterator->second;
     }
 
     void set(const clang::ValueDecl* declaration, PointerFact value) {
@@ -75,9 +116,15 @@ struct State {
         expression = strip_expr(expression);
         if (expression == nullptr || value.origin == Origin::No) {
             expr_values.erase(expression);
+            if (const std::optional<std::string> key = stable_lvalue_key(expression)) {
+                stable_values.erase(*key);
+            }
             return;
         }
         expr_values[expression] = value;
+        if (const std::optional<std::string> key = stable_lvalue_key(expression)) {
+            stable_values[*key] = value;
+        }
     }
 
     void prepare_refinement(const clang::ValueDecl* subject) {
@@ -123,6 +170,12 @@ struct State {
                 value.null_state = null_state;
             }
         }
+        for (auto& [key, value] : stable_values) {
+            (void)key;
+            if (value.origin == Origin::Yes) {
+                value.null_state = null_state;
+            }
+        }
     }
 
     bool join(const State& other) {
@@ -162,6 +215,33 @@ struct State {
             const PointerFact merged = join_fact(old, other.fact_for_expr(expression));
             changed = changed || old != merged;
             set_expr(expression, merged);
+        }
+
+        std::unordered_set<std::string> stable_keys;
+        stable_keys.reserve(stable_values.size() + other.stable_values.size());
+        for (const auto& [key, unused] : stable_values) {
+            (void)unused;
+            stable_keys.insert(key);
+        }
+        for (const auto& [key, unused] : other.stable_values) {
+            (void)unused;
+            stable_keys.insert(key);
+        }
+
+        for (const std::string& key : stable_keys) {
+            const auto lhs_iterator = stable_values.find(key);
+            const PointerFact old =
+                lhs_iterator == stable_values.end() ? PointerFact{} : lhs_iterator->second;
+            const auto rhs_iterator = other.stable_values.find(key);
+            const PointerFact rhs =
+                rhs_iterator == other.stable_values.end() ? PointerFact{} : rhs_iterator->second;
+            const PointerFact merged = join_fact(old, rhs);
+            changed = changed || old != merged;
+            if (merged.origin == Origin::No) {
+                stable_values.erase(key);
+            } else {
+                stable_values[key] = merged;
+            }
         }
         return changed;
     }

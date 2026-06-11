@@ -6,6 +6,14 @@ struct item {
     int value;
 };
 
+struct item_box {
+    struct item* item;
+};
+
+struct nested_item_box {
+    struct item_box box;
+};
+
 RG_NULLABLE struct item* nullable_item(void);
 RG_NULLABLE char* nullable_bytes(void);
 typedef int (*callback)(void);
@@ -66,6 +74,30 @@ int guarded_through_alias(void) {
         return 0;
     }
     return item->value + alias->value;
+}
+
+int unchecked_member_storage(void) {
+    struct item_box box;
+    box.item = nullable_item();
+    return box.item->value;
+}
+
+int checked_member_storage(void) {
+    struct item_box box;
+    box.item = nullable_item();
+    if (box.item == NULL) {
+        return 0;
+    }
+    return box.item->value;
+}
+
+int checked_nested_member_storage(void) {
+    struct nested_item_box outer;
+    outer.box.item = nullable_item();
+    if (!outer.box.item) {
+        return 0;
+    }
+    return outer.box.item->value;
 }
 
 int safe_short_circuit_and(void) {
@@ -167,5 +199,4 @@ int unchecked_unsafe_inferred(void) {
     struct item* item = check_and_return_unsafe();
     return item->value;
 }
-
 
