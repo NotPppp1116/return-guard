@@ -28,15 +28,38 @@ original value. Because the check is an expression wrapper, nesting,
 short-circuit evaluation, pointer types, and integer types are preserved.
 
 Calls whose results ReturnGuard already proves handled are not rewritten.
-Macro-expanded calls and source ranges outside the main file are currently
-skipped rather than rewritten unsafely.
+Directly returning a result is treated as error propagation rather than as an
+unchecked local use. Macro-expanded calls and source ranges outside the main
+file are currently skipped rather than rewritten unsafely.
+
+## CMake package integration
+
+After installing ReturnGuard, a CMake project can harden one target with:
+
+```cmake
+find_package(ReturnGuard CONFIG REQUIRED)
+
+add_executable(my_program main.c)
+returnguard_harden_target(my_program)
+```
+
+`returnguard_harden_target()` attaches the installed compiler launcher for C and
+C++ sources and links `ReturnGuard::runtime`. The project's normal source tree
+remains unchanged.
+
+A custom installation prefix can be selected through `CMAKE_PREFIX_PATH`:
+
+```sh
+cmake -S . -B build-hardened \
+    -DCMAKE_PREFIX_PATH=/path/to/returnguard/prefix
+cmake --build build-hardened
+```
 
 ## Transparent compiler launcher
 
-The installed `returnguard-compiler-launcher` can instrument each translation
-unit immediately before the real compiler processes it. CMake compiler launchers
-receive the compiler executable as their first argument, which matches this
-script's interface:
+The installed `returnguard-compiler-launcher` can also be configured directly.
+CMake compiler launchers receive the compiler executable as their first
+argument, which matches this script's interface:
 
 ```sh
 cmake -S . -B build-hardened \
@@ -46,27 +69,26 @@ cmake -S . -B build-hardened \
 cmake --build build-hardened
 ```
 
+When configured manually, the final targets must also link the installed
+`ReturnGuard::runtime` target or `libreturnguard_runtime.a`.
+
 The launcher:
 
 1. creates a temporary transformed source beside the original source;
 2. invokes ReturnGuard with the real compilation arguments;
 3. compiles the transformed source;
 4. rewrites dependency output to name the original source;
-5. preserves the original path for `__FILE__` and diagnostics with `#line`;
+5. preserves original `__FILE__`, macro, diagnostic, and debug paths;
 6. removes the temporary source even when compilation fails.
-
-The final program must still link `returnguard_runtime`. For CMake projects,
-link the installed library to each hardened executable or shared library:
-
-```cmake
-target_link_libraries(my_program PRIVATE returnguard_runtime)
-```
 
 The launcher recognizes these optional environment variables:
 
 - `RETURNGUARD_TOOL`: explicit path to the ReturnGuard executable;
 - `RETURNGUARD_INCLUDE_DIR`: directory containing `returnguard/Runtime.h`;
 - `RETURNGUARD_DISABLE=1`: pass the compilation through unchanged.
+
+Unsupported response-file and standard-input source compilations fail closed
+rather than silently compiling an uninstrumented source.
 
 ## Runtime
 
@@ -105,6 +127,10 @@ void* allocate_packet(size_t size) RETURNGUARD_FAILS_NULL;
 int commit_database(void) RETURNGUARD_FAILS_NEGATIVE;
 ```
 
+A null contract requires a pointer return type. A negative contract requires a
+signed integer return type. Invalid declarations stop transformation with an
+error instead of silently bypassing the contract.
+
 `free` and `memcpy` are intentionally not return-result contracts. `free`
 belongs to ownership/lifetime analysis, while invalid `memcpy` arguments cause
 undefined behavior rather than a reported failure.
@@ -128,4 +154,5 @@ policy.
 - Indirect function-pointer calls require future contract propagation.
 - GCC-specific compilation options unsupported by Clang may require filtering or
   a Clang-based hardened build.
-- Linking the runtime is still an explicit build-system step.
+- C and C++ compilers must support the path-remapping options used by the
+  launcher; current testing targets modern GCC and Clang on Linux.
