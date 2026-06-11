@@ -147,3 +147,13 @@ add_test(
         --tool "$<TARGET_FILE:returnguard>"
         --compiler "${CMAKE_C_COMPILER}"
 )
+
+add_test(
+    NAME returnguard.invalid_instrumentation_contract
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_invalid_instrumentation_contract.py"
+        --tool "$<TARGET_FILE:returnguard>"
+        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_invalid_contract.c"
+        --include "${CMAKE_SOURCE_DIR}/include"
+)
