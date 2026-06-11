@@ -27,7 +27,9 @@ class SiteMapError(RuntimeError):
     pass
 
 
-def discover_maps(input_directories: Iterable[pathlib.Path], output: pathlib.Path) -> list[pathlib.Path]:
+def discover_maps(
+    input_directories: Iterable[pathlib.Path], output: pathlib.Path
+) -> list[pathlib.Path]:
     output = output.resolve(strict=False)
     maps: set[pathlib.Path] = set()
     for directory in input_directories:
@@ -50,7 +52,9 @@ def require_string(site: dict[str, Any], field: str, path: pathlib.Path) -> str:
     return value
 
 
-def require_nonnegative_integer(site: dict[str, Any], field: str, path: pathlib.Path) -> int:
+def require_nonnegative_integer(
+    site: dict[str, Any], field: str, path: pathlib.Path
+) -> int:
     value = site.get(field)
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise SiteMapError(
@@ -71,7 +75,9 @@ def validate_site(raw: Any, path: pathlib.Path) -> dict[str, Any]:
     try:
         identifier = int(identifier_text, 10)
     except ValueError as error:
-        raise SiteMapError(f"{path}: invalid decimal site ID {identifier_text!r}") from error
+        raise SiteMapError(
+            f"{path}: invalid decimal site ID {identifier_text!r}"
+        ) from error
     if identifier <= 0 or identifier > 0xFFFFFFFFFFFFFFFF:
         raise SiteMapError(f"{path}: site ID is outside the unsigned 64-bit range")
 
@@ -184,9 +190,11 @@ def main() -> int:
     arguments = parser.parse_args()
 
     try:
-        paths = discover_maps(arguments.input_dir, arguments.output)
+        output = arguments.output.expanduser().resolve(strict=False)
+        output.unlink(missing_ok=True)
+        paths = discover_maps(arguments.input_dir, output)
         sites = merge_maps(paths)
-        write_atomic(arguments.output, sites)
+        write_atomic(output, sites)
     except SiteMapError as error:
         print(f"returnguard-site-map: {error}", file=sys.stderr)
         return 2
@@ -195,7 +203,7 @@ def main() -> int:
         return 2
 
     print(
-        f"returnguard-site-map: wrote {len(sites)} sites from {len(paths)} files to {arguments.output}"
+        f"returnguard-site-map: wrote {len(sites)} sites from {len(paths)} files to {output}"
     )
     return 0
 
