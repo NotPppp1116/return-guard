@@ -98,6 +98,7 @@ Each successfully inserted wrapper has one record:
       "column": 14,
       "function": "load_configuration",
       "callee": "open",
+      "callee_type": "int (const char *, int, ...)",
       "predicate": "negative"
     }
   ]
@@ -106,9 +107,11 @@ Each successfully inserted wrapper has one record:
 
 The ID is stored as a decimal string so JSON consumers do not lose precision.
 ReturnGuard currently computes a 64-bit FNV-1a hash over the normalized file,
-line, column, enclosing function, callee, and failure predicate. A zero hash is
-reserved. Different metadata producing the same ID is a hard transformation
-error within a translation unit and a hard merge error across translation units.
+line, column, enclosing function, qualified callee name, canonical callee type,
+and failure predicate. Including the canonical type distinguishes C++ overloads
+that share the same qualified name. A zero hash is reserved. Different metadata
+producing the same ID is a hard transformation error within a translation unit
+and a hard merge error across translation units.
 
 Per-object maps can be combined after a build:
 
@@ -118,11 +121,11 @@ returnguard-site-map \
     --output build/my_program.returnguard-sites.json
 ```
 
-The merger validates the schema, unsigned 64-bit ID range, predicate names,
-ID collisions, and inconsistent IDs assigned to the same logical site. It sorts
-records by numeric ID and replaces the combined output atomically. The requested
-output is removed before validation, so a failed merge cannot leave an older map
-looking current.
+The merger validates the schema, unsigned 64-bit ID range, canonical callee type,
+predicate names, ID collisions, and inconsistent IDs assigned to the same logical
+site. It sorts records by numeric ID and replaces the combined output atomically.
+The requested output is removed before validation, so a failed merge cannot leave
+an older map looking current.
 
 ## Transparent compiler launcher
 
