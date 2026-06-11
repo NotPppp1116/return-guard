@@ -45,3 +45,24 @@ struct item* unsafe_nullable_call_branch(int selector) {
 int use_unsafe_nullable_call_branch(int selector) {
     return unsafe_nullable_call_branch(selector)->value;
 }
+
+static inline void* ERR_PTR(long error) {
+    return (void*)error;
+}
+
+static inline int IS_ERR(const void* ptr) {
+    return (unsigned long)ptr >= (unsigned long)-4095;
+}
+
+struct item* error_pointer_or_item(int fail) {
+    static struct item fallback = {7};
+    return fail ? (struct item*)ERR_PTR(-12) : &fallback;
+}
+
+int use_error_pointer_after_check(int fail) {
+    struct item* item = error_pointer_or_item(fail);
+    if (IS_ERR(item)) {
+        return -1;
+    }
+    return item->value;
+}

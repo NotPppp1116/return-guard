@@ -208,13 +208,19 @@ bool is_common_value_helper_name(llvm::StringRef name) {
         "distance",
         "empty",
         "end",
+        "ERR_CAST",
+        "ERR_PTR",
         "extents",
         "front",
         "get",
+        "IS_ERR",
+        "IS_ERR_OR_NULL",
         "length",
         "lock",
         "makeShared",
         "makeUnique",
+        "PTR_ERR",
+        "PTR_ERR_OR_ZERO",
         "rc",
         "rbegin",
         "rend",
@@ -227,6 +233,21 @@ bool is_common_value_helper_name(llvm::StringRef name) {
         "value_or",
     };
     return exact_names.contains(name.str());
+}
+
+bool is_error_pointer_adapter(const clang::FunctionDecl* function) {
+    if (function == nullptr || function->getIdentifier() == nullptr) {
+        return false;
+    }
+    static const std::unordered_set<std::string> adapter_names = {
+        "ERR_CAST",
+        "ERR_PTR",
+        "IS_ERR",
+        "IS_ERR_OR_NULL",
+        "PTR_ERR",
+        "PTR_ERR_OR_ZERO",
+    };
+    return adapter_names.contains(function->getName().str());
 }
 
 bool is_common_value_helper(const clang::FunctionDecl* function) {
@@ -424,8 +445,17 @@ bool Analyzer::call_requires_verification(const clang::CallExpr* call) const {
 
 bool Analyzer::should_report(const CheckResult& result, const Domain& domain,
                              const clang::CallExpr* call) const {
+    if (!domain.fallible_contract &&
+        (result.kind == HandlingKind::Ignored ||
+         result.kind == HandlingKind::Consumed ||
+         result.kind == HandlingKind::PartiallyChecked) &&
+        is_error_pointer_adapter(call == nullptr ? nullptr : call->getDirectCallee())) {
+        return false;
+    }
+
     if (!domain.fallible_contract && !call_requires_verification(call) &&
-        (result.kind == HandlingKind::Consumed ||
+        (result.kind == HandlingKind::Ignored ||
+         result.kind == HandlingKind::Consumed ||
          result.kind == HandlingKind::PartiallyChecked) &&
         is_common_value_helper(call == nullptr ? nullptr : call->getDirectCallee())) {
         return false;

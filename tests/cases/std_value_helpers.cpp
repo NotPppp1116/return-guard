@@ -29,3 +29,16 @@ void standard_value_helpers(std::string text) {
     std::make_tuple(1, 2);
     std::to_string(42);
 }
+
+static inline long PTR_ERR(const void* ptr) {
+    return reinterpret_cast<long>(ptr);
+}
+
+static inline bool IS_ERR(const void* ptr) {
+    return reinterpret_cast<unsigned long>(ptr) >= static_cast<unsigned long>(-4095);
+}
+
+void kernel_error_pointer_helpers(void* ptr) {
+    PTR_ERR(ptr);
+    IS_ERR(ptr);
+}

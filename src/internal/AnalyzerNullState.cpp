@@ -1,5 +1,6 @@
 #include "Analyzer.hpp"
 
+#include "AstUtils.hpp"
 #include "ContractPolicy.hpp"
 #include "NullStateAnalysis.hpp"
 #include "ReturnCollector.hpp"
@@ -51,6 +52,8 @@ bool function_has_nullable_annotation(const clang::FunctionDecl& function) {
 bool function_returns_nullable_pointer_expression(const clang::Expr* expr,
                                                   clang::ASTContext& context,
                                                   const Analyzer& analyzer);
+
+bool expression_contains_nonnull_factory(const clang::Expr* expr);
 
 bool expression_can_return_null_literal(const clang::Expr* expr, clang::ASTContext& context) {
     if (expr == nullptr) {
@@ -112,6 +115,105 @@ bool function_returns_nullable_pointer_expression(const clang::Expr* expr,
     return false;
 }
 
+bool function_is_nonnull_owner_factory(const clang::FunctionDecl* function) {
+    if (function == nullptr || function->getIdentifier() == nullptr) {
+        return false;
+    }
+    const llvm::StringRef name = function->getName();
+    return name == "makeUnique" || name == "makeShared" ||
+           name == "make_unique" || name == "make_shared";
+}
+
+bool function_is_error_pointer_factory(const clang::FunctionDecl* function) {
+    if (function == nullptr || function->getIdentifier() == nullptr) {
+        return false;
+    }
+    const llvm::StringRef name = function->getName();
+    return name == "ERR_PTR" || name == "ERR_CAST";
+}
+
+bool expression_returns_error_pointer(const clang::Expr* expr) {
+    expr = strip_expr(expr);
+    if (expr == nullptr) {
+        return false;
+    }
+
+    if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expr)) {
+        return function_is_error_pointer_factory(call->getDirectCallee());
+    }
+
+    if (const auto* conditional = llvm::dyn_cast<clang::ConditionalOperator>(expr)) {
+        return expression_returns_error_pointer(conditional->getTrueExpr()) ||
+               expression_returns_error_pointer(conditional->getFalseExpr());
+    }
+
+    if (const auto* conditional = llvm::dyn_cast<clang::BinaryConditionalOperator>(expr)) {
+        return expression_returns_error_pointer(conditional->getCommon()) ||
+               expression_returns_error_pointer(conditional->getFalseExpr());
+    }
+
+    return false;
+}
+
+bool expression_contains_nonnull_factory(const clang::Expr* expr) {
+    expr = strip_expr(expr);
+    if (expr == nullptr) {
+        return false;
+    }
+
+    if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expr)) {
+        if (function_is_nonnull_owner_factory(call->getDirectCallee())) {
+            return true;
+        }
+    }
+
+    for (const clang::Stmt* child : expr->children()) {
+        if (const auto* child_expr = llvm::dyn_cast_or_null<clang::Expr>(child);
+            child_expr != nullptr && expression_contains_nonnull_factory(child_expr)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool expression_is_nonnull_owner(const clang::Expr* expr) {
+    expr = strip_expr(expr);
+    if (expr == nullptr) {
+        return false;
+    }
+
+    if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expr)) {
+        if (function_is_nonnull_owner_factory(call->getDirectCallee())) {
+            return true;
+        }
+    }
+
+    const auto* member_call = llvm::dyn_cast<clang::CXXMemberCallExpr>(expr);
+    if (member_call == nullptr) {
+        return false;
+    }
+
+    const clang::CXXMethodDecl* method = member_call->getMethodDecl();
+    if (!has_identifier_name(method, "emplace_back")) {
+        return false;
+    }
+
+    for (const clang::Expr* argument : member_call->arguments()) {
+        if (expression_contains_nonnull_factory(argument)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool call_is_get_on_nonnull_owner(const clang::CallExpr* call) {
+    const auto* member_call = llvm::dyn_cast_or_null<clang::CXXMemberCallExpr>(call);
+    if (member_call == nullptr || !has_identifier_name(member_call->getMethodDecl(), "get")) {
+        return false;
+    }
+    return expression_is_nonnull_owner(member_call->getImplicitObjectArgument());
+}
+
 } // namespace
 
 bool Analyzer::call_returns_nullable_pointer(const clang::CallExpr* call) const {
@@ -121,6 +223,10 @@ bool Analyzer::call_returns_nullable_pointer(const clang::CallExpr* call) const 
 
     const clang::QualType return_type = call->getCallReturnType(context_);
     if (!return_type->isPointerType()) {
+        return false;
+    }
+
+    if (call_is_get_on_nonnull_owner(call)) {
         return false;
     }
 
@@ -168,6 +274,22 @@ bool Analyzer::is_nullable_function_impl(
         std::vector<const clang::ReturnStmt*> return_stmts;
         ReturnCollector collector(context_, return_stmts);
         collector.TraverseStmt(const_cast<clang::Stmt*>(definition->getBody()));
+
+        bool has_error_pointer_return = false;
+        bool has_null_literal_return = false;
+        for (const clang::ReturnStmt* return_stmt : return_stmts) {
+            const clang::Expr* value =
+                return_stmt == nullptr ? nullptr : return_stmt->getRetValue();
+            has_error_pointer_return =
+                has_error_pointer_return || expression_returns_error_pointer(value);
+            has_null_literal_return =
+                has_null_literal_return || expression_can_return_null_literal(value, context_);
+        }
+        if (has_error_pointer_return && !has_null_literal_return) {
+            active.erase(canonical);
+            nullable_cache_[canonical] = false;
+            return false;
+        }
 
         NullStateAnalysis* analysis = null_state_analysis(definition);
         if (analysis != nullptr) {
