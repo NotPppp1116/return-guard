@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import pathlib
 import shutil
@@ -199,6 +200,42 @@ def dependency_file(arguments: Sequence[str]) -> pathlib.Path | None:
     return None
 
 
+def compiler_output_file(arguments: Sequence[str]) -> pathlib.Path | None:
+    for index, argument in enumerate(arguments):
+        if argument == "-o" and index + 1 < len(arguments):
+            return pathlib.Path(arguments[index + 1])
+        if (
+            argument.startswith("-o")
+            and len(argument) > 2
+            and argument not in {"-ObjC", "-ObjC++"}
+        ):
+            return pathlib.Path(argument[2:])
+    return None
+
+
+def site_map_output(
+    arguments: Sequence[str], original_source: pathlib.Path
+) -> pathlib.Path | None:
+    configured = os.environ.get("RETURNGUARD_SITE_MAP_DIR")
+    if not configured:
+        return None
+
+    object_file = compiler_output_file(arguments)
+    if object_file is None:
+        raise LauncherError(
+            "RETURNGUARD_SITE_MAP_DIR requires a compile command with an explicit -o output"
+        )
+    if not object_file.is_absolute():
+        object_file = pathlib.Path.cwd() / object_file
+    object_file = object_file.resolve(strict=False)
+
+    directory = pathlib.Path(configured).expanduser().resolve(strict=False)
+    directory.mkdir(parents=True, exist_ok=True)
+    identity = f"{object_file}\0{original_source}".encode("utf-8", errors="surrogateescape")
+    digest = hashlib.sha256(identity).hexdigest()[:16]
+    return directory / f"{object_file.name}.{digest}.json"
+
+
 def insert_compiler_options(
     arguments: Sequence[str], additional: Sequence[str]
 ) -> list[str]:
@@ -264,6 +301,9 @@ def main() -> int:
         source_index, original_source = source
         returnguard = executable_from_environment("RETURNGUARD_TOOL", "returnguard")
         include = runtime_include_directory()
+        metadata_output = site_map_output(arguments, original_source)
+        if metadata_output is not None:
+            metadata_output.unlink(missing_ok=True)
 
         temporary_handle = tempfile.NamedTemporaryFile(
             mode="w",
@@ -278,21 +318,35 @@ def main() -> int:
 
         try:
             analysis_arguments = tool_arguments(arguments, source_index)
-            transform = subprocess.run(
+            transform_command = [
+                str(returnguard),
+                "--no-color",
+                f"--instrument-output={temporary_source}",
+            ]
+            if metadata_output is not None:
+                transform_command.append(f"--site-map-output={metadata_output}")
+                source_root = os.environ.get("RETURNGUARD_SOURCE_ROOT")
+                if source_root:
+                    transform_command.append(
+                        f"--site-root={pathlib.Path(source_root).expanduser().resolve(strict=False)}"
+                    )
+            transform_command.extend(
                 [
-                    str(returnguard),
-                    "--no-color",
-                    f"--instrument-output={temporary_source}",
                     str(original_source),
                     "--",
                     *analysis_arguments,
-                ],
-                check=False,
+                ]
             )
+
+            transform = subprocess.run(transform_command, check=False)
             if transform.returncode != 0:
+                if metadata_output is not None:
+                    metadata_output.unlink(missing_ok=True)
                 return transform.returncode
             if not temporary_source.is_file() or temporary_source.stat().st_size == 0:
                 raise LauncherError("ReturnGuard produced no transformed source")
+            if metadata_output is not None and not metadata_output.is_file():
+                raise LauncherError("ReturnGuard produced no site metadata output")
 
             add_original_line_mapping(temporary_source, original_source)
 
@@ -315,6 +369,8 @@ def main() -> int:
             rewrite_dependency_file(
                 dependency_file(arguments), temporary_source, original_source
             )
+            if result.returncode != 0 and metadata_output is not None:
+                metadata_output.unlink(missing_ok=True)
             return result.returncode
         finally:
             temporary_source.unlink(missing_ok=True)
