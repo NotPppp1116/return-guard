@@ -4,6 +4,7 @@
 #include <clang/AST/Attr.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
+#include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/SourceManager.h>
 #include <clang/Lex/Lexer.h>
 #include <clang/Rewrite/Core/Rewriter.h>
@@ -68,14 +69,38 @@ bool Instrumentation::should_instrument(const CheckResult& handling) const {
            handling.kind == HandlingKind::Consumed;
 }
 
+bool Instrumentation::validate_contract(const clang::CallExpr* call,
+                                        FailurePredicate predicate) const {
+    const clang::QualType return_type = call->getCallReturnType(context_);
+    const bool valid = predicate == FailurePredicate::Null
+                           ? return_type->isPointerType()
+                           : return_type->isSignedIntegerType();
+    if (valid) {
+        return true;
+    }
+
+    const clang::FunctionDecl* callee = call->getDirectCallee();
+    const std::string function = callee == nullptr ? "<indirect>" : callee->getNameAsString();
+    const char* requirement = predicate == FailurePredicate::Null
+                                  ? "a pointer return type"
+                                  : "a signed integer return type";
+    clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
+    const unsigned diagnostic = diagnostics.getCustomDiagID(
+        clang::DiagnosticsEngine::Error,
+        "returnguard: failure contract on '%0' requires %1, but the function returns %2");
+    diagnostics.Report(call->getExprLoc(), diagnostic)
+        << function << requirement << return_type.getAsString();
+    return false;
+}
+
 bool Instrumentation::consider(const clang::CallExpr* call,
                                const CheckResult& handling) {
-    if (call == nullptr || !should_instrument(handling)) {
+    if (call == nullptr) {
         return false;
     }
 
     const clang::FunctionDecl* callee = call->getDirectCallee();
-    if (callee == nullptr || call->getCallReturnType(context_)->isVoidType()) {
+    if (callee == nullptr) {
         return false;
     }
 
@@ -99,7 +124,11 @@ bool Instrumentation::consider(const clang::CallExpr* call,
         }
     }
 
-    return predicate.has_value() && wrap_call(call, *predicate);
+    if (!predicate.has_value() || !validate_contract(call, *predicate) ||
+        !should_instrument(handling)) {
+        return false;
+    }
+    return wrap_call(call, *predicate);
 }
 
 bool Instrumentation::wrap_call(const clang::CallExpr* call,
