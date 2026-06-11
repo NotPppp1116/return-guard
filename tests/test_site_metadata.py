@@ -87,9 +87,12 @@ def validate_document(document: dict[str, Any]) -> tuple[bool, str]:
             return False, f"invalid column: {site!r}"
 
         callee = site.get("callee")
+        callee_type = site.get("callee_type")
         predicate = site.get("predicate")
         if not isinstance(callee, str) or not isinstance(predicate, str):
             return False, f"invalid callee or predicate: {site!r}"
+        if not isinstance(callee_type, str) or not callee_type:
+            return False, f"invalid canonical callee type: {site!r}"
         observed[callee] = predicate
 
         identifier_text = site.get("id")
