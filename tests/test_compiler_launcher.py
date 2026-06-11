@@ -87,10 +87,14 @@ static int unavailable_status(void) {
     return -1;
 }
 
+static int consume_status(int status) {
+    return status + LOCAL_BIAS;
+}
+
 const char* compiled_source_name = __FILE__;
 
 int main(void) {
-    return unavailable_status() + LOCAL_BIAS;
+    return consume_status(unavailable_status());
 }
 """,
             encoding="utf-8",
@@ -165,7 +169,8 @@ int main(void) {
             """#include <returnguard/Contracts.h>
 static int fail(void) RETURNGUARD_FAILS_NEGATIVE;
 static int fail(void) { return -1; }
-int main(void) { return fail(); }
+static int consume(int value) { return value; }
+int main(void) { return consume(fail()); }
 """,
             encoding="utf-8",
         )
