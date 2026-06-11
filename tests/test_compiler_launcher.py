@@ -30,6 +30,29 @@ def run(
     )
 
 
+def link_and_expect_fatal(
+    *,
+    compiler: pathlib.Path,
+    object_file: pathlib.Path,
+    runtime: pathlib.Path,
+    program: pathlib.Path,
+) -> tuple[bool, str]:
+    link_result = run(
+        [str(compiler), str(object_file), str(runtime), "-o", str(program)]
+    )
+    if link_result.returncode != 0:
+        return False, f"linking failed\n{link_result.stdout}"
+
+    execution = run([str(program)])
+    if execution.returncode != 127:
+        return (
+            False,
+            f"instrumented program exited with {execution.returncode}, expected 127\n"
+            f"{execution.stdout}",
+        )
+    return True, ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--launcher", required=True)
@@ -87,6 +110,7 @@ int main(void) {
                 "-Wextra",
                 "-Wpedantic",
                 "-Werror",
+                "-g",
                 "-MMD",
                 "-MF",
                 str(dependency_file),
@@ -121,22 +145,87 @@ int main(void) {
 
         object_bytes = object_file.read_bytes()
         if str(source).encode() not in object_bytes:
-            return fail("#line mapping did not preserve the original __FILE__ path")
+            return fail("original source path was not preserved in the object file")
         if b".returnguard-" in object_bytes:
-            return fail("temporary source path leaked into the object file")
+            return fail("temporary source path leaked into debug or macro data")
 
-        link_result = run(
-            [str(compiler), str(object_file), str(runtime), "-o", str(program)]
+        linked, message = link_and_expect_fatal(
+            compiler=compiler,
+            object_file=object_file,
+            runtime=runtime,
+            program=program,
         )
-        if link_result.returncode != 0:
-            return fail("linking the launcher-produced object failed", link_result.stdout)
+        if not linked:
+            return fail("launcher-produced program failed", message)
 
-        execution = run([str(program)])
-        if execution.returncode != 127:
+        extensionless = directory / "extensionless"
+        extensionless_object = directory / "extensionless.o"
+        extensionless_program = directory / "extensionless-program"
+        extensionless.write_text(
+            """#include <returnguard/Contracts.h>
+static int fail(void) RETURNGUARD_FAILS_NEGATIVE;
+static int fail(void) { return -1; }
+int main(void) { return fail(); }
+""",
+            encoding="utf-8",
+        )
+        extensionless_compile = run(
+            [
+                sys.executable,
+                str(launcher),
+                str(compiler),
+                "-x",
+                "c",
+                "-std=c17",
+                "-I",
+                str(include),
+                "-c",
+                str(extensionless),
+                "-o",
+                str(extensionless_object),
+            ],
+            environment=environment,
+        )
+        if extensionless_compile.returncode != 0:
             return fail(
-                f"instrumented program exited with {execution.returncode}, expected 127",
-                execution.stdout,
+                "extensionless -x c source was not instrumented",
+                extensionless_compile.stdout,
             )
+        linked, message = link_and_expect_fatal(
+            compiler=compiler,
+            object_file=extensionless_object,
+            runtime=runtime,
+            program=extensionless_program,
+        )
+        if not linked:
+            return fail("extensionless launcher program failed", message)
+
+        response_file = directory / "compile.rsp"
+        response_object = directory / "response.o"
+        response_file.write_text(
+            f"-std=c17 -c {source} -o {response_object}\n", encoding="utf-8"
+        )
+        response_result = run(
+            [
+                sys.executable,
+                str(launcher),
+                str(compiler),
+                f"@{response_file}",
+            ],
+            environment=environment,
+        )
+        if response_result.returncode != 2:
+            return fail(
+                "unsupported response-file compilation did not fail closed",
+                response_result.stdout,
+            )
+        if "response files are not supported" not in response_result.stdout:
+            return fail(
+                "response-file failure did not explain the instrumentation limit",
+                response_result.stdout,
+            )
+        if response_object.exists():
+            return fail("response-file compilation bypassed instrumentation")
 
     return 0
 
