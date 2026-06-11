@@ -171,6 +171,26 @@ def main() -> int:
                     output=basic_compile.stdout,
                 )
 
+            contextual_source = cases / "instrumentation_contextual_io.c"
+            contextual_output = directory / "instrumented-contextual-io.c"
+            contextual = require_transform(
+                tool=tool,
+                source=contextual_source,
+                output=contextual_output,
+                include=include,
+                standard="c17",
+            )
+            if "__RG_CHECK_" in contextual:
+                return fail(
+                    "context-sensitive read/write calls were made fatal by default",
+                    output=contextual,
+                )
+            if "#include <returnguard/Runtime.h>" in contextual:
+                return fail(
+                    "runtime header was injected without any instrumented call",
+                    output=contextual,
+                )
+
             c_types_source = cases / "instrumentation_types.c"
             c_types_output = directory / "instrumented-types.c"
             c_types = require_transform(
