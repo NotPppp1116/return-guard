@@ -89,6 +89,7 @@ add_executable(returnguard
     src/internal/AstUtils.cpp
     src/internal/CFGValueFlow.cpp
     src/internal/ConditionEvaluator.cpp
+    src/internal/ContractPolicy.cpp
     src/internal/DomainUtils.cpp
     src/internal/HandlerFinder.cpp
     src/internal/IfChain.cpp
