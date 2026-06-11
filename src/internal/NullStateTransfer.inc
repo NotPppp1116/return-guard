@@ -1,3 +1,5 @@
+#include "NullStateModel_helpers.inc"
+
 class Transfer final {
     public:
         Transfer(
@@ -257,7 +259,8 @@ void transfer_block(
     State& state,
     const NullSource& target,
     std::unordered_set<const clang::Expr*>* unsafe,
-    const clang::ASTContext& context) {
+    const clang::ASTContext& context,
+    const clang::CFG* cfg) {
     Transfer transfer(state, target, unsafe, const_cast<clang::ASTContext&>(context));
     for (const clang::CFGElement& element : block) {
         if (const auto statement = element.getAs<clang::CFGStmt>()) {
@@ -275,13 +278,44 @@ State state_for_successor(
     State state,
     unsigned successor_index,
     const NullSource& target,
-    const clang::ASTContext& context) {
+    const clang::ASTContext& context,
+    const clang::CFG* cfg = nullptr) {
     if (block.succ_size() != 2U || successor_index > 1U) {
         return state;
     }
 
+    const clang::Expr* condition = block.getLastCondition();
+    if (condition == nullptr) return state;
+
+    // If the condition is a reference to a variable with an initializer, attempt
+    // to substitute the initializer as the condition only when the variable has
+    // no mutations on any path reaching this block. This uses the CFG pointer
+    // passed in to conservatively scan reaching blocks for writes/escapes.
+    if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(condition)) {
+        if (const auto* var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl())) {
+            if (var->getInit() != nullptr) {
+                if (cfg != nullptr) {
+                    // Build set of blocks that can reach `block` and scan them.
+                    const std::unordered_set<unsigned> reaching = blocks_reaching_cfg(cfg, block);
+                    bool mutated = false;
+                    for (const clang::CFGBlock* b : *cfg) {
+                        if (b == nullptr) continue;
+                        if (!reaching.contains(b->getBlockID())) continue;
+                        if (var_mutated_in_block(*b, var, context)) { mutated = true; break; }
+                    }
+                    if (!mutated) {
+                        const BranchConstraint constraint = condition_constraint(var->getInit(), state, target, context);
+                        if (!constraint.recognized) return state;
+                        state.refine(successor_index == 0U ? constraint.true_state : constraint.false_state);
+                        return state;
+                    }
+                }
+            }
+        }
+    }
+
     const BranchConstraint constraint =
-        condition_constraint(block.getLastCondition(), state, target, context);
+        condition_constraint(condition, state, target, context);
     if (!constraint.recognized) {
         return state;
     }
