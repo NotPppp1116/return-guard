@@ -1,6 +1,7 @@
 #pragma once
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -35,14 +36,35 @@ extern "C" {
 #define RETURNGUARD_RUNTIME_NOEXCEPT
 #endif
 
+typedef enum ReturnGuardSecretResult {
+    RETURNGUARD_SECRET_OK = 0,
+    RETURNGUARD_SECRET_INVALID = -1,
+    RETURNGUARD_SECRET_REGISTRY_FULL = -2,
+    RETURNGUARD_SECRET_NOT_FOUND = -3,
+    RETURNGUARD_SECRET_BUSY = -4,
+    RETURNGUARD_SECRET_ALREADY_REGISTERED = -5,
+} ReturnGuardSecretResult;
+
+/*
+ * Register memory that should be zeroed before the fatal hook runs. Register a
+ * region before placing sensitive bytes in it, and unregister it before the
+ * region is freed or otherwise becomes invalid. The registry has fixed
+ * capacity and never allocates.
+ */
+ReturnGuardSecretResult returnguard_register_secret(void* memory, size_t size)
+    RETURNGUARD_RUNTIME_NOEXCEPT;
+ReturnGuardSecretResult returnguard_unregister_secret(void* memory)
+    RETURNGUARD_RUNTIME_NOEXCEPT;
+
 RETURNGUARD_RUNTIME_NORETURN RETURNGUARD_RUNTIME_COLD RETURNGUARD_RUNTIME_NOINLINE
     RETURNGUARD_RUNTIME_HIDDEN void
     __rg_fatal(uint32_t site_id, int saved_errno) RETURNGUARD_RUNTIME_NOEXCEPT;
 
 /*
- * Applications may provide a strong definition of this hook. The default weak
- * implementation does nothing. The hook may wipe explicitly tracked secrets or
- * emit a minimal diagnostic, but it must not attempt to recover execution.
+ * Applications may provide a strong definition of this hook. Registered secret
+ * regions have already been wiped when it runs. The default weak implementation
+ * does nothing. The hook may emit a minimal diagnostic, but it must not attempt
+ * to recover execution.
  */
 void __rg_fatal_hook(uint32_t site_id, int saved_errno) RETURNGUARD_RUNTIME_NOEXCEPT;
 
