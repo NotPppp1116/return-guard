@@ -157,3 +157,14 @@ add_test(
         --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_invalid_contract.c"
         --include "${CMAKE_SOURCE_DIR}/include"
 )
+
+add_test(
+    NAME returnguard.site_metadata
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_site_metadata.py"
+        --tool "$<TARGET_FILE:returnguard>"
+        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation.c"
+        --invalid-source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_invalid_contract.c"
+        --include "${CMAKE_SOURCE_DIR}/include"
+)
