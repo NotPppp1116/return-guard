@@ -65,22 +65,21 @@ llvm::cl::opt<bool> no_color(
 
 llvm::cl::list<std::string> contract_options(
     "contract",
-    llvm::cl::desc(
-        "Add a failure contract as qualified_name=null or qualified_name=negative"),
+    llvm::cl::desc("Add a failure contract as qualified_name=null, qualified_name=negative, or "
+                   "qualified_name=byte-count:N"),
     llvm::cl::ZeroOrMore,
     llvm::cl::cat(category));
 
 llvm::cl::list<std::string> contract_file_options(
     "contract-file",
-    llvm::cl::desc(
-        "Read failure contracts from a file using qualified_name=null lines"),
+    llvm::cl::desc("Read failure contracts from a file using qualified_name=null style lines"),
     llvm::cl::ZeroOrMore,
     llvm::cl::cat(category));
 
 llvm::cl::list<std::string> function_config_options(
     "function-config",
-    llvm::cl::desc(
-        "Read function policy lines: 'contract name null|negative' or 'lifetime name alloc|free|realloc'"),
+    llvm::cl::desc("Read function policy lines: 'contract name null|negative|byte-count:N' or "
+                   "'lifetime name alloc|free|realloc'"),
     llvm::cl::ZeroOrMore,
     llvm::cl::cat(category));
 
@@ -107,8 +106,21 @@ returnguard::Mode parse_mode(llvm::StringRef value) {
 
 bool valid_contract_spec(llvm::StringRef value) {
     const auto [name, predicate] = value.split('=');
-    return !name.trim().empty() &&
-           (predicate.trim() == "null" || predicate.trim() == "negative");
+    llvm::StringRef trimmed_predicate = predicate.trim();
+    if (name.trim().empty()) {
+        return false;
+    }
+    if (trimmed_predicate == "null" || trimmed_predicate == "negative") {
+        return true;
+    }
+
+    llvm::StringRef byte_count_argument = trimmed_predicate;
+    if (!byte_count_argument.consume_front("byte-count:") &&
+        !byte_count_argument.consume_front("byte_count:")) {
+        return false;
+    }
+    unsigned ignored = 0;
+    return !byte_count_argument.empty() && !byte_count_argument.getAsInteger(10, ignored);
 }
 
 bool valid_lifetime_spec(llvm::StringRef value) {
@@ -143,7 +155,7 @@ void parse_function_config_line(llvm::StringRef text, const std::string& path,
 
     llvm::errs() << "returnguard: invalid function policy in " << path << ':' << line_number
                  << " (expected 'contract name null|negative' or "
-                    "'lifetime name alloc|free|realloc')\n";
+                    "'contract name byte-count:N' or 'lifetime name alloc|free|realloc')\n";
     std::exit(2);
 }
 
@@ -186,9 +198,9 @@ std::vector<std::string> collect_contracts() {
                 continue;
             }
             if (!valid_contract_spec(text)) {
-                llvm::errs() << "returnguard: invalid contract in " << path << ':'
-                             << line_number
-                             << " (expected qualified_name=null or qualified_name=negative)\n";
+                llvm::errs() << "returnguard: invalid contract in " << path << ':' << line_number
+                             << " (expected qualified_name=null, qualified_name=negative, "
+                                "or qualified_name=byte-count:N)\n";
                 std::exit(2);
             }
             contracts.push_back(text.str());
@@ -197,9 +209,9 @@ std::vector<std::string> collect_contracts() {
 
     for (const std::string& contract : contracts) {
         if (!valid_contract_spec(contract)) {
-            llvm::errs()
-                << "returnguard: invalid --contract='" << contract
-                << "' (expected qualified_name=null or qualified_name=negative)\n";
+            llvm::errs() << "returnguard: invalid --contract='" << contract
+                         << "' (expected qualified_name=null, qualified_name=negative, or "
+                            "qualified_name=byte-count:N)\n";
             std::exit(2);
         }
     }

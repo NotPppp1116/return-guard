@@ -75,6 +75,18 @@ add_returnguard_test(returnguard.switches switches.c strict 1 "open-ended")
 add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value of 'annotated_status'")
 add_returnguard_test(returnguard.must_check must_check.c practical 2 "must_check_status")
 add_returnguard_test(returnguard.nodiscard nodiscard.cpp practical 1 "nodiscard_status")
+add_returnguard_test(
+    returnguard.short_write short_write.c practical 6 "possible short write"
+    --expect "positive return may be smaller than requested byte count"
+    --expect "checking only for a negative return misses partial writes"
+    --expect "direct_pwrite_negative_only"
+    --expect "direct_send_negative_only"
+    --expect "direct_sendto_negative_only"
+    --expect "assigned_write_negative_only"
+    --expect "assignment_condition_write_negative_only"
+    --reject "count_checked_write"
+    --reject "count_checked_assignment"
+    --reject "count_checked_assignment_condition")
 add_returnguard_clean_test(returnguard.bool_predicate bool_predicate.c practical)
 add_returnguard_test(returnguard.bool_predicate_strict bool_predicate.c strict 1 "ready")
 add_returnguard_clean_test(returnguard.bool_binding_condition bool_binding_condition.c practical)

@@ -27,6 +27,13 @@ void system_namespace_sample(void) {
     consume_file(std::fopen("ignored", "r"));
 }
 
+int configured_byte_count_contract_sample(int fd, const char* buffer, unsigned long size) {
+    if (vendor::send_like(fd, buffer, size) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 int configured_null_contract_sample(void) {
     return null_factory()->value;
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
@@ -45,10 +46,66 @@ DEFAULT_SCAN_EXCLUDED_DIRS = frozenset(
         "node_modules",
     }
 )
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+RETURNGUARD_DIAGNOSTIC_RE = re.compile(
+    r"\b(?:warning|error): returnguard(?: safety)?: (?P<message>.*)"
+)
 
 
 class RunnerError(RuntimeError):
     pass
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
+
+
+def diagnostic_type(message: str) -> str:
+    message = message.strip()
+    if message.startswith("possible short write"):
+        return "short write or send"
+    if "potentially-null return value" in message or "prior null check" in message:
+        return "nullable pointer"
+    if "out-of-bounds" in message or "array index" in message:
+        return "bounds"
+    if "use of memory after it was freed" in message:
+        return "use after free"
+    if "potential double free" in message:
+        return "double free"
+    if "address of stack-allocated variable returned" in message:
+        return "lifetime"
+    if "signed left shift" in message:
+        return "integer overflow"
+    if "consumed but not verified" in message:
+        return "unchecked consumed return"
+    if "not handled exhaustively" in message:
+        return "partial return handling"
+    if "is not handled" in message:
+        return "ignored return"
+    return "other"
+
+
+def diagnostics_in_output(path: pathlib.Path) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as output:
+            for raw_line in output:
+                line = strip_ansi(raw_line)
+                match = RETURNGUARD_DIAGNOSTIC_RE.search(line)
+                if match is None:
+                    continue
+                counts[diagnostic_type(match.group("message"))] += 1
+    except FileNotFoundError:
+        pass
+    return counts
+
+
+def print_diagnostic_summary(counts: Counter[str]) -> None:
+    if not counts:
+        return
+    print("returnguard-project: diagnostic summary by type:", file=sys.stderr)
+    for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+        print(f"  {count:5d}  {name}", file=sys.stderr)
 
 
 def default_jobs() -> int:
@@ -368,6 +425,11 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write diagnostics only to --log-dir instead of stdout",
     )
+    result.add_argument(
+        "--no-summary",
+        action="store_true",
+        help="do not print the grouped diagnostic summary",
+    )
     result.add_argument("--list-files", action="store_true")
     result.add_argument("--dry-run", action="store_true")
     result.add_argument("--verbose", action="store_true")
@@ -523,6 +585,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         failed_count = 0
         timed_out_count = 0
         internal_error_count = 0
+        diagnostic_summary: Counter[str] = Counter()
         stop_event = threading.Event()
 
         with tempfile.TemporaryDirectory(prefix="returnguard-project-") as temporary:
@@ -588,6 +651,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         ),
                         stream_output=not arguments.no_stream_output,
                     )
+                    if not arguments.no_summary:
+                        diagnostic_summary.update(
+                            diagnostics_in_output(run_result.output_path)
+                        )
 
                     if (
                         arguments.progress_every > 0
@@ -605,6 +672,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         elapsed = time.monotonic() - started
         stopped_early = completed_count < len(selected)
+        if not arguments.no_summary:
+            print_diagnostic_summary(diagnostic_summary)
         print(
             "returnguard-project: "
             f"analyzed {completed_count}/{len(selected)} translation units "

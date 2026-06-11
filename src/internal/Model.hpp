@@ -47,6 +47,7 @@ struct CheckResult {
     HandlingKind kind = HandlingKind::Ignored;
     std::vector<DomainValue> missing;
     std::string detail;
+    std::string message;
 };
 
 struct SymbolicInteger {

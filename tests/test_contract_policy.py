@@ -62,6 +62,8 @@ def main() -> int:
             return fail(f"missing built-in contract diagnostic: {expected}", base.stdout)
     if "return value of 'vendor::open'" in base.stdout:
         return fail("vendor::open inherited a global POSIX contract", base.stdout)
+    if "possible short write from 'vendor::send_like'" in base.stdout:
+        return fail("vendor::send_like inherited a byte-count contract", base.stdout)
 
     with tempfile.TemporaryDirectory(prefix="returnguard-contract-policy-") as name:
         directory = pathlib.Path(name)
@@ -102,6 +104,41 @@ def main() -> int:
         ):
             return fail("custom null contract did not drive null-state analysis", custom_null.stdout)
 
+        custom_byte_count = run(
+            [
+                str(tool),
+                "--no-color",
+                "--contract=vendor::send_like=byte-count:2",
+                str(source),
+                "--",
+                "-std=c++20",
+                "-I",
+                str(include),
+            ]
+        )
+        if custom_byte_count.returncode != 0:
+            return fail("custom byte-count contract analysis failed", custom_byte_count.stdout)
+        if "possible short write from 'vendor::send_like'" not in custom_byte_count.stdout:
+            return fail(
+                "custom byte-count contract did not diagnose vendor::send_like",
+                custom_byte_count.stdout,
+            )
+
+        invalid_byte_count = run(
+            [
+                str(tool),
+                "--no-color",
+                "--contract=vendor::send_like=byte-count:not-a-number",
+                str(source),
+                "--",
+                "-std=c++20",
+                "-I",
+                str(include),
+            ]
+        )
+        if invalid_byte_count.returncode != 2:
+            return fail("invalid byte-count contract was accepted", invalid_byte_count.stdout)
+
         contract_file = directory / "contracts.txt"
         contract_file.write_text("# project contracts\nvendor::open=negative\n", encoding="utf-8")
         from_file = run(
@@ -123,7 +160,9 @@ def main() -> int:
 
         function_config = directory / "function-config.rg"
         function_config.write_text(
-            "# combined function policy\ncontract vendor::open negative\n",
+            "# combined function policy\n"
+            "contract vendor::open negative\n"
+            "contract vendor::send_like byte-count:2\n",
             encoding="utf-8",
         )
         from_config = run(
@@ -142,6 +181,11 @@ def main() -> int:
             return fail("function-config analysis failed", from_config.stdout)
         if "return value of 'vendor::open' is consumed but not verified" not in from_config.stdout:
             return fail("function config did not diagnose vendor::open", from_config.stdout)
+        if "possible short write from 'vendor::send_like'" not in from_config.stdout:
+            return fail(
+                "function config did not diagnose vendor::send_like",
+                from_config.stdout,
+            )
 
     return 0
 

@@ -276,6 +276,7 @@ std::optional<CheckResult> Analyzer::analyze_flow_aliases(const clang::CallExpr*
             .kind = HandlingKind::Consumed,
             .missing = {},
             .detail = "stored result is not handled on every reachable CFG path",
+            .message = {},
         };
     }
     return result;

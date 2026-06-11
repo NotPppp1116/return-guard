@@ -120,6 +120,54 @@ std::optional<FailurePredicate> configured_contract(const clang::FunctionDecl& f
     return std::nullopt;
 }
 
+std::optional<unsigned> parse_byte_count_parameter_index(llvm::StringRef value) {
+    value = value.trim();
+    llvm::StringRef argument;
+    if (value.consume_front("byte-count:")) {
+        argument = value;
+    } else if (value.consume_front("byte_count:")) {
+        argument = value;
+    } else {
+        return std::nullopt;
+    }
+
+    unsigned parsed = 0;
+    if (argument.getAsInteger(10, parsed)) {
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+std::optional<unsigned> configured_byte_count_parameter_index(const clang::FunctionDecl& function) {
+    for (const std::string& contract : returnguard::options().contracts) {
+        const auto [name, predicate_text] = llvm::StringRef(contract).split('=');
+        const std::optional<unsigned> index = parse_byte_count_parameter_index(predicate_text);
+        if (index.has_value() && contract_name_matches(function, name)) {
+            return index;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<unsigned>
+builtin_byte_count_parameter_index(const clang::FunctionDecl& function,
+                                   const clang::SourceManager& source_manager) {
+    if (!source_manager.isInSystemHeader(function.getLocation()) || !is_global_context(function)) {
+        return std::nullopt;
+    }
+
+    if (has_any_name(function, {
+                                   "pwrite",
+                                   "pwrite64",
+                                   "send",
+                                   "sendto",
+                                   "write",
+                               })) {
+        return 2U;
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 std::optional<FailurePredicate> failure_contract(const clang::FunctionDecl& function,
@@ -129,6 +177,10 @@ std::optional<FailurePredicate> failure_contract(const clang::FunctionDecl& func
     }
     if (const std::optional<FailurePredicate> configured = configured_contract(function)) {
         return configured;
+    }
+    if (configured_byte_count_parameter_index(function).has_value() ||
+        builtin_byte_count_parameter_index(function, source_manager).has_value()) {
+        return FailurePredicate::Negative;
     }
 
     if (!source_manager.isInSystemHeader(function.getLocation())) {
@@ -247,6 +299,15 @@ std::optional<FailurePredicate> failure_contract(const clang::FunctionDecl& func
     }
 
     return std::nullopt;
+}
+
+std::optional<unsigned> byte_count_parameter_index(const clang::FunctionDecl& function,
+                                                   const clang::SourceManager& source_manager) {
+    if (const std::optional<unsigned> configured =
+            configured_byte_count_parameter_index(function)) {
+        return configured;
+    }
+    return builtin_byte_count_parameter_index(function, source_manager);
 }
 
 } // namespace returnguard::internal
