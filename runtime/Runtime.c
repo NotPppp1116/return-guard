@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #define RETURNGUARD_SECRET_CAPACITY 64U
+#define RETURNGUARD_SECONDARY_FATAL_SPINS 1000000U
 
 typedef enum SecretSlotState {
     SECRET_SLOT_FREE = 0U,
@@ -11,6 +12,12 @@ typedef enum SecretSlotState {
     SECRET_SLOT_READY = 2U,
     SECRET_SLOT_WIPING = 3U,
 } SecretSlotState;
+
+typedef enum FatalState {
+    FATAL_STATE_IDLE = 0U,
+    FATAL_STATE_WIPING = 1U,
+    FATAL_STATE_WIPED = 2U,
+} FatalState;
 
 typedef struct SecretSlot {
     atomic_uint state;
@@ -20,6 +27,7 @@ typedef struct SecretSlot {
 
 static SecretSlot secret_slots[RETURNGUARD_SECRET_CAPACITY];
 static atomic_flag secret_registry_lock = ATOMIC_FLAG_INIT;
+static atomic_uint fatal_state;
 
 static void lock_secret_registry(void) {
     while (atomic_flag_test_and_set_explicit(
@@ -156,12 +164,26 @@ RETURNGUARD_RUNTIME_WEAK void __rg_fatal_hook(uint32_t site_id, int saved_errno)
 RETURNGUARD_RUNTIME_NORETURN RETURNGUARD_RUNTIME_COLD RETURNGUARD_RUNTIME_NOINLINE
     RETURNGUARD_RUNTIME_HIDDEN void
     __rg_fatal(uint32_t site_id, int saved_errno) {
-    static atomic_flag failure_in_progress = ATOMIC_FLAG_INIT;
-
-    if (!atomic_flag_test_and_set_explicit(
-            &failure_in_progress, memory_order_relaxed)) {
+    unsigned expected = FATAL_STATE_IDLE;
+    if (atomic_compare_exchange_strong_explicit(
+            &fatal_state,
+            &expected,
+            FATAL_STATE_WIPING,
+            memory_order_acq_rel,
+            memory_order_acquire)) {
         wipe_registered_secrets();
+        atomic_store_explicit(
+            &fatal_state, FATAL_STATE_WIPED, memory_order_release);
         __rg_fatal_hook(site_id, saved_errno);
+        _Exit(127);
+    }
+
+    for (unsigned spin = 0U; spin < RETURNGUARD_SECONDARY_FATAL_SPINS; ++spin) {
+        if (atomic_load_explicit(&fatal_state, memory_order_acquire) ==
+            FATAL_STATE_WIPED) {
+            break;
+        }
+        atomic_signal_fence(memory_order_seq_cst);
     }
 
     _Exit(127);
