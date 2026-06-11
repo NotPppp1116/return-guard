@@ -1,0 +1,32 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/ReturnGuardTargets.cmake")
+
+set(ReturnGuard_TOOL "@PACKAGE_CMAKE_INSTALL_BINDIR@/returnguard")
+set(ReturnGuard_COMPILER_LAUNCHER
+    "@PACKAGE_CMAKE_INSTALL_BINDIR@/returnguard-compiler-launcher")
+set(ReturnGuard_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+
+function(returnguard_harden_target target)
+    if(NOT TARGET "${target}")
+        message(FATAL_ERROR
+            "returnguard_harden_target: target '${target}' does not exist")
+    endif()
+
+    set(_returnguard_launcher
+        "${CMAKE_COMMAND}"
+        -E
+        env
+        "RETURNGUARD_TOOL=${ReturnGuard_TOOL}"
+        "RETURNGUARD_INCLUDE_DIR=${ReturnGuard_INCLUDE_DIR}"
+        "${ReturnGuard_COMPILER_LAUNCHER}"
+    )
+
+    set_property(TARGET "${target}" PROPERTY
+        C_COMPILER_LAUNCHER "${_returnguard_launcher}")
+    set_property(TARGET "${target}" PROPERTY
+        CXX_COMPILER_LAUNCHER "${_returnguard_launcher}")
+    target_link_libraries("${target}" PRIVATE ReturnGuard::runtime)
+endfunction()
+
+check_required_components(ReturnGuard)
