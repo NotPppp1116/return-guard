@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import pathlib
 import shutil
 import subprocess
 import sys
-import tempfile
 from collections.abc import Sequence
 
 SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".c++", ".C"})
@@ -73,24 +71,6 @@ def executable_from_environment(name: str, fallback: str) -> pathlib.Path:
     return pathlib.Path(candidate).expanduser().resolve()
 
 
-def runtime_include_directory() -> pathlib.Path:
-    configured = os.environ.get("RETURNGUARD_INCLUDE_DIR")
-    if configured:
-        include = pathlib.Path(configured).expanduser().resolve()
-    else:
-        launcher = pathlib.Path(__file__).resolve()
-        include = launcher.parent.parent / "include"
-        if not include.is_dir():
-            include = launcher.parent.parent.parent / "include"
-
-    header = include / "returnguard" / "Runtime.h"
-    if not header.is_file():
-        raise LauncherError(
-            "could not locate returnguard/Runtime.h; set RETURNGUARD_INCLUDE_DIR"
-        )
-    return include
-
-
 def positional_arguments(arguments: Sequence[str]) -> list[tuple[int, str]]:
     positional: list[tuple[int, str]] = []
     index = 0
@@ -134,7 +114,7 @@ def explicit_language(arguments: Sequence[str]) -> str | None:
 def source_argument(arguments: Sequence[str]) -> tuple[int, pathlib.Path] | None:
     if any(argument.startswith("@") for argument in arguments):
         raise LauncherError(
-            "compiler response files are not supported yet; refusing to bypass instrumentation"
+            "compiler response files are not supported yet; refusing to bypass analysis"
         )
 
     language = explicit_language(arguments)
@@ -143,7 +123,7 @@ def source_argument(arguments: Sequence[str]) -> tuple[int, pathlib.Path] | None
     for index, argument in positional_arguments(arguments):
         if argument == "-" and language_selects_source:
             raise LauncherError(
-                "source from standard input is not supported by the hardened launcher"
+                "source from standard input is not supported by the analysis launcher"
             )
 
         path = pathlib.Path(argument)
@@ -191,125 +171,6 @@ def tool_arguments(arguments: Sequence[str], source_index: int) -> list[str]:
     return filtered
 
 
-def dependency_file(arguments: Sequence[str]) -> pathlib.Path | None:
-    for index, argument in enumerate(arguments):
-        if argument == "-MF" and index + 1 < len(arguments):
-            return pathlib.Path(arguments[index + 1])
-        if argument.startswith("-MF") and len(argument) > 3:
-            return pathlib.Path(argument[3:])
-    return None
-
-
-def compiler_output_file(arguments: Sequence[str]) -> pathlib.Path | None:
-    for index, argument in enumerate(arguments):
-        if argument == "-o" and index + 1 < len(arguments):
-            return pathlib.Path(arguments[index + 1])
-        if (
-            argument.startswith("-o")
-            and len(argument) > 2
-            and argument not in {"-ObjC", "-ObjC++"}
-        ):
-            return pathlib.Path(argument[2:])
-    return None
-
-
-def absolute_compiler_output(arguments: Sequence[str]) -> pathlib.Path | None:
-    output = compiler_output_file(arguments)
-    if output is None:
-        return None
-    if not output.is_absolute():
-        output = pathlib.Path.cwd() / output
-    return output.resolve(strict=False)
-
-
-def site_map_output(
-    arguments: Sequence[str], original_source: pathlib.Path
-) -> pathlib.Path | None:
-    configured = os.environ.get("RETURNGUARD_SITE_MAP_DIR")
-    if not configured:
-        return None
-
-    object_file = absolute_compiler_output(arguments)
-    if object_file is None:
-        raise LauncherError(
-            "RETURNGUARD_SITE_MAP_DIR requires a compile command with an explicit -o output"
-        )
-
-    directory = pathlib.Path(configured).expanduser().resolve(strict=False)
-    directory.mkdir(parents=True, exist_ok=True)
-    identity = f"{object_file}\0{original_source}".encode(
-        "utf-8", errors="surrogateescape"
-    )
-    digest = hashlib.sha256(identity).hexdigest()[:16]
-    return directory / f"{object_file.name}.{digest}.json"
-
-
-def create_temporary_source(
-    arguments: Sequence[str], original_source: pathlib.Path
-) -> tuple[pathlib.Path, pathlib.Path | None]:
-    output = absolute_compiler_output(arguments)
-    if output is not None:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        temporary_directory = pathlib.Path(
-            tempfile.mkdtemp(prefix=".returnguard-", dir=output.parent)
-        )
-        return temporary_directory / original_source.name, temporary_directory
-
-    temporary_handle = tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        prefix=f".{original_source.stem}.returnguard-",
-        suffix=original_source.suffix,
-        dir=original_source.parent,
-        delete=False,
-    )
-    temporary_source = pathlib.Path(temporary_handle.name)
-    temporary_handle.close()
-    return temporary_source, None
-
-
-def prepend_compiler_options(
-    arguments: Sequence[str], additional: Sequence[str]
-) -> list[str]:
-    result = list(arguments)
-    try:
-        separator = result.index("--")
-    except ValueError:
-        separator = len(result)
-    result[0:0] = additional
-    if separator == 0:
-        result.remove("--")
-        result[len(additional):len(additional)] = ["--"]
-    return result
-
-
-def add_original_line_mapping(transformed: pathlib.Path, original: pathlib.Path) -> None:
-    content = transformed.read_text(encoding="utf-8")
-    include_line = "#include <returnguard/Runtime.h>\n"
-    escaped = str(original).replace("\\", "\\\\").replace('"', '\\"')
-    mapping = f'#line 1 "{escaped}"\n'
-    if content.startswith(include_line):
-        content = include_line + mapping + content[len(include_line) :]
-    else:
-        content = mapping + content
-    transformed.write_text(content, encoding="utf-8")
-
-
-def rewrite_dependency_file(
-    path: pathlib.Path | None, temporary: pathlib.Path, original: pathlib.Path
-) -> None:
-    if path is None:
-        return
-    if not path.is_absolute():
-        path = pathlib.Path.cwd() / path
-    if not path.is_file():
-        return
-
-    content = path.read_text(encoding="utf-8", errors="surrogateescape")
-    content = content.replace(str(temporary), str(original))
-    path.write_text(content, encoding="utf-8", errors="surrogateescape")
-
-
 def run_passthrough(compiler: str, arguments: Sequence[str]) -> int:
     return subprocess.run([compiler, *arguments], check=False).returncode
 
@@ -328,10 +189,6 @@ def main() -> int:
     if os.environ.get("RETURNGUARD_DISABLE") == "1":
         return run_passthrough(compiler, arguments)
 
-    temporary_source: pathlib.Path | None = None
-    temporary_directory: pathlib.Path | None = None
-    metadata_output: pathlib.Path | None = None
-
     try:
         source = source_argument(arguments)
         if source is None:
@@ -339,87 +196,26 @@ def main() -> int:
 
         source_index, original_source = source
         returnguard = executable_from_environment("RETURNGUARD_TOOL", "returnguard")
-        include = runtime_include_directory()
-        metadata_output = site_map_output(arguments, original_source)
-        if metadata_output is not None:
-            metadata_output.unlink(missing_ok=True)
-
-        temporary_source, temporary_directory = create_temporary_source(
-            arguments, original_source
-        )
-
         analysis_arguments = tool_arguments(arguments, source_index)
-        transform_command = [
+        analysis_command = [
             str(returnguard),
             "--no-color",
-            f"--instrument-output={temporary_source}",
+            str(original_source),
+            "--",
+            *analysis_arguments,
         ]
-        if metadata_output is not None:
-            transform_command.append(f"--site-map-output={metadata_output}")
-            source_root = os.environ.get("RETURNGUARD_SOURCE_ROOT")
-            if source_root:
-                transform_command.append(
-                    f"--site-root={pathlib.Path(source_root).expanduser().resolve(strict=False)}"
-                )
-        transform_command.extend(
-            [
-                str(original_source),
-                "--",
-                *analysis_arguments,
-            ]
-        )
 
-        transform = subprocess.run(transform_command, check=False)
-        if transform.returncode != 0:
-            if metadata_output is not None:
-                metadata_output.unlink(missing_ok=True)
-            return transform.returncode
-        if not temporary_source.is_file() or temporary_source.stat().st_size == 0:
-            raise LauncherError("ReturnGuard produced no transformed source")
-        if metadata_output is not None and not metadata_output.is_file():
-            raise LauncherError("ReturnGuard produced no site metadata output")
+        analysis = subprocess.run(analysis_command, check=False)
+        if analysis.returncode != 0:
+            return analysis.returncode
 
-        add_original_line_mapping(temporary_source, original_source)
-
-        compiler_arguments = list(arguments)
-        compiler_arguments[source_index] = str(temporary_source)
-        path_options = [
-            "-iquote",
-            str(original_source.parent),
-            "-I",
-            str(include),
-            f"-ffile-prefix-map={temporary_source}={original_source}",
-            f"-fdebug-prefix-map={temporary_source}={original_source}",
-            f"-fmacro-prefix-map={temporary_source}={original_source}",
-        ]
-        compiler_arguments = prepend_compiler_options(
-            compiler_arguments, path_options
-        )
-        result = subprocess.run(
-            [compiler, *compiler_arguments],
-            check=False,
-        )
-        rewrite_dependency_file(
-            dependency_file(arguments), temporary_source, original_source
-        )
-        if result.returncode != 0 and metadata_output is not None:
-            metadata_output.unlink(missing_ok=True)
-        return result.returncode
+        return run_passthrough(compiler, arguments)
     except LauncherError as error:
-        if metadata_output is not None:
-            metadata_output.unlink(missing_ok=True)
         print(f"returnguard-compiler-launcher: {error}", file=sys.stderr)
         return 2
     except OSError as error:
-        if metadata_output is not None:
-            metadata_output.unlink(missing_ok=True)
         print(f"returnguard-compiler-launcher: {error}", file=sys.stderr)
         return 2
-    finally:
-        if temporary_source is not None:
-            temporary_source.unlink(missing_ok=True)
-        if temporary_directory is not None:
-            shutil.rmtree(temporary_directory, ignore_errors=True)
 
 
 if __name__ == "__main__":

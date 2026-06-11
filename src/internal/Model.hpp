@@ -37,6 +37,7 @@ struct DomainValue {
 
 struct Domain {
     bool finite = false;
+    bool fallible_contract = false;
     bool inferred_from_body = false;
     std::string type_name;
     std::vector<DomainValue> values;

@@ -93,28 +93,11 @@ add_executable(returnguard
     src/internal/DomainUtils.cpp
     src/internal/HandlerFinder.cpp
     src/internal/IfChain.cpp
-    src/internal/Instrumentation.cpp
     src/internal/NullStateAnalysis.cpp
     src/internal/ReturnCollector.cpp
     src/internal/ValueSetInference.cpp
 )
 set_target_properties(returnguard PROPERTIES EXPORT_NAME tool)
-
-add_library(returnguard_runtime STATIC
-    runtime/Runtime.c
-)
-set_target_properties(returnguard_runtime PROPERTIES
-    EXPORT_NAME runtime
-    C_STANDARD 11
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-    POSITION_INDEPENDENT_CODE ON
-)
-target_include_directories(returnguard_runtime
-    PUBLIC
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-        "$<INSTALL_INTERFACE:include>"
-)
 
 target_include_directories(returnguard
     PRIVATE
@@ -219,7 +202,7 @@ write_basic_package_version_file(
     COMPATIBILITY SameMajorVersion
 )
 
-install(TARGETS returnguard returnguard_runtime
+install(TARGETS returnguard
     EXPORT ReturnGuardTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -240,7 +223,6 @@ install(
     FILES
         include/returnguard/Contracts.h
         include/returnguard/Nullability.h
-        include/returnguard/Runtime.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/returnguard
 )
 install(
@@ -254,11 +236,6 @@ install(
     RENAME returnguard-compiler-launcher
 )
 install(
-    PROGRAMS scripts/returnguard_site_map.py
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    RENAME returnguard-site-map
-)
-install(
     FILES scripts/returnguard_project_runtime.py
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
@@ -268,19 +245,6 @@ if(RETURNGUARD_BUILD_TESTS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_subdirectory(tests)
     add_test(
-        NAME returnguard.instrumentation
-        COMMAND
-            "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_instrumentation.py"
-            --tool "$<TARGET_FILE:returnguard>"
-            --source "${CMAKE_CURRENT_SOURCE_DIR}/tests/cases/instrumentation.c"
-            --cases "${CMAKE_CURRENT_SOURCE_DIR}/tests/cases"
-            --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
-            --compiler "${CMAKE_C_COMPILER}"
-            --cxx-compiler "${CMAKE_CXX_COMPILER}"
-            --runtime "$<TARGET_FILE:returnguard_runtime>"
-    )
-    add_test(
         NAME returnguard.compiler_launcher
         COMMAND
             "${Python3_EXECUTABLE}"
@@ -289,7 +253,6 @@ if(RETURNGUARD_BUILD_TESTS)
             --tool "$<TARGET_FILE:returnguard>"
             --compiler "${CMAKE_C_COMPILER}"
             --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
-            --runtime "$<TARGET_FILE:returnguard_runtime>"
     )
     add_test(
         NAME returnguard.cmake_package

@@ -188,6 +188,68 @@ bool is_boolean_domain(const Domain& domain) {
            (domain.type_name == "bool" || domain.type_name == "_Bool");
 }
 
+bool starts_with_any(llvm::StringRef value, std::initializer_list<llvm::StringRef> prefixes) {
+    for (llvm::StringRef prefix : prefixes) {
+        if (value.starts_with(prefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_common_value_helper_name(llvm::StringRef name) {
+    static const std::unordered_set<std::string> exact_names = {
+        "at",
+        "back",
+        "begin",
+        "c_str",
+        "copy",
+        "data",
+        "distance",
+        "empty",
+        "end",
+        "extents",
+        "front",
+        "get",
+        "length",
+        "lock",
+        "makeShared",
+        "makeUnique",
+        "rc",
+        "rbegin",
+        "rend",
+        "sc",
+        "size",
+        "str",
+        "string",
+        "value",
+        "valueOrDefault",
+        "value_or",
+    };
+    return exact_names.contains(name.str());
+}
+
+bool is_common_value_helper(const clang::FunctionDecl* function) {
+    if (function == nullptr || function->getIdentifier() == nullptr) {
+        return false;
+    }
+    const llvm::StringRef name = function->getName();
+    if (is_common_value_helper_name(name)) {
+        return true;
+    }
+    if (llvm::isa<clang::CXXMethodDecl>(function)) {
+        return starts_with_any(name, {
+                                         "get",
+                                         "is",
+                                         "has",
+                                         "can",
+                                         "should",
+                                         "to",
+                                     });
+    }
+    return false;
+}
+
 } // namespace
 
 CheckResult Analyzer::analyze_variable(const clang::CallExpr* call, const clang::VarDecl* variable,
@@ -362,6 +424,13 @@ bool Analyzer::call_requires_verification(const clang::CallExpr* call) const {
 
 bool Analyzer::should_report(const CheckResult& result, const Domain& domain,
                              const clang::CallExpr* call) const {
+    if (!domain.fallible_contract && !call_requires_verification(call) &&
+        (result.kind == HandlingKind::Consumed ||
+         result.kind == HandlingKind::PartiallyChecked) &&
+        is_common_value_helper(call == nullptr ? nullptr : call->getDirectCallee())) {
+        return false;
+    }
+
     switch (returnguard::options().mode) {
     case Mode::IgnoredOnly:
         return result.kind == HandlingKind::Ignored;
@@ -371,6 +440,11 @@ bool Analyzer::should_report(const CheckResult& result, const Domain& domain,
             return true;
         }
         if (call_requires_verification(call) && result.kind == HandlingKind::Consumed) {
+            return true;
+        }
+        if (domain.fallible_contract &&
+            (result.kind == HandlingKind::Consumed ||
+             result.kind == HandlingKind::PartiallyChecked)) {
             return true;
         }
         if (is_boolean_domain(domain) && result.kind == HandlingKind::PartiallyChecked) {

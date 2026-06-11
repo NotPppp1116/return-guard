@@ -1,6 +1,7 @@
 #include "Analyzer.hpp"
 
 #include "AstUtils.hpp"
+#include "ContractPolicy.hpp"
 #include "DomainUtils.hpp"
 #include "ReturnCollector.hpp"
 
@@ -22,6 +23,24 @@
 #include <vector>
 
 namespace returnguard::internal {
+namespace {
+
+llvm::APSInt signed_value(std::int64_t value) {
+    llvm::APInt raw(64U, static_cast<std::uint64_t>(value), true);
+    return llvm::APSInt(raw, false);
+}
+
+Domain negative_contract_domain(clang::QualType type) {
+    Domain domain;
+    domain.finite = true;
+    domain.fallible_contract = true;
+    domain.type_name = type.getAsString();
+    add_domain_value(domain, signed_value(-1), "failure (<0)");
+    add_domain_value(domain, signed_value(0), "success (>=0)");
+    return domain;
+}
+
+} // namespace
 
 Domain Analyzer::enum_domain(const clang::EnumDecl* declaration) const {
     Domain domain;
@@ -127,10 +146,19 @@ Domain Analyzer::function_domain(const clang::FunctionDecl* function,
     }
 
     Domain by_type = type_domain(function->getReturnType());
+    if (failure_contract(*function, source_manager_) == FailurePredicate::Negative &&
+        function->getReturnType()->isSignedIntegerType()) {
+        by_type = negative_contract_domain(function->getReturnType());
+    }
+
     Domain annotated = annotation_domain(function);
     if (annotated.finite) {
         domain_cache_[canonical] = annotated;
         return annotated;
+    }
+    if (by_type.fallible_contract) {
+        domain_cache_[canonical] = by_type;
+        return by_type;
     }
 
     if (active.contains(canonical)) {

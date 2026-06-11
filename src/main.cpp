@@ -63,38 +63,17 @@ llvm::cl::opt<bool> no_color(
     llvm::cl::init(false),
     llvm::cl::cat(category));
 
-llvm::cl::opt<std::string> instrument_output(
-    "instrument-output",
-    llvm::cl::desc(
-        "Write one transformed source file with fail-closed call checks"),
-    llvm::cl::init(""),
-    llvm::cl::cat(category));
-
-llvm::cl::opt<std::string> site_map_output(
-    "site-map-output",
-    llvm::cl::desc(
-        "Write JSON metadata mapping instrumented site IDs to source locations"),
-    llvm::cl::init(""),
-    llvm::cl::cat(category));
-
-llvm::cl::opt<std::string> site_root(
-    "site-root",
-    llvm::cl::desc(
-        "Normalize site-map source paths relative to this project root"),
-    llvm::cl::init(""),
-    llvm::cl::cat(category));
-
 llvm::cl::list<std::string> contract_options(
     "contract",
     llvm::cl::desc(
-        "Add an instrumentation failure contract as qualified_name=null or qualified_name=negative"),
+        "Add a failure contract as qualified_name=null or qualified_name=negative"),
     llvm::cl::ZeroOrMore,
     llvm::cl::cat(category));
 
 llvm::cl::list<std::string> contract_file_options(
     "contract-file",
     llvm::cl::desc(
-        "Read instrumentation failure contracts from a file using qualified_name=null lines"),
+        "Read failure contracts from a file using qualified_name=null lines"),
     llvm::cl::ZeroOrMore,
     llvm::cl::cat(category));
 
@@ -256,22 +235,6 @@ int main(int argc, const char** argv) {
         return 2;
     }
 
-    if (!instrument_output.empty() && parser->getSourcePathList().size() != 1U) {
-        llvm::errs()
-            << "returnguard: --instrument-output requires exactly one source file\n";
-        return 2;
-    }
-    if (!site_map_output.empty() && instrument_output.empty()) {
-        llvm::errs()
-            << "returnguard: --site-map-output requires --instrument-output\n";
-        return 2;
-    }
-    if (!site_root.empty() && site_map_output.empty()) {
-        llvm::errs()
-            << "returnguard: --site-root requires --site-map-output\n";
-        return 2;
-    }
-
     FunctionConfig function_config = collect_function_config();
     std::vector<std::string> contracts = collect_contracts();
     contracts.insert(contracts.end(), function_config.contracts.begin(),
@@ -285,9 +248,6 @@ int main(int argc, const char** argv) {
         .explicit_void_is_handled = explicit_void_is_handled,
         .fail_on_diagnostics = fail_on_diagnostics,
         .color = !no_color,
-        .instrument_output = instrument_output,
-        .site_map_output = site_map_output,
-        .site_root = site_root,
         .contracts = std::move(contracts),
         .lifetime_roles = std::move(function_config.lifetime_roles),
     });

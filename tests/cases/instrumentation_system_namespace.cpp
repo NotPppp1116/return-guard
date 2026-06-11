@@ -12,10 +12,20 @@ static void consume_file(std::FILE* file) {
     (void)file;
 }
 
+struct Node {
+    int value;
+};
+
+Node* null_factory();
+
 void system_namespace_sample(void) {
     consume_status(vendor::open("ignored", 0));
     consume_status(::openat(AT_FDCWD, "ignored", O_RDONLY));
     consume_status(::close(-1));
     consume_status(std::fputs("ignored", stderr));
     consume_file(std::fopen("ignored", "r"));
+}
+
+int configured_null_contract_sample(void) {
+    return null_factory()->value;
 }

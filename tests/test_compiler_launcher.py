@@ -30,43 +30,18 @@ def run(
     )
 
 
-def link_and_expect_fatal(
-    *,
-    compiler: pathlib.Path,
-    object_file: pathlib.Path,
-    runtime: pathlib.Path,
-    program: pathlib.Path,
-) -> tuple[bool, str]:
-    link_result = run(
-        [str(compiler), str(object_file), str(runtime), "-o", str(program)]
-    )
-    if link_result.returncode != 0:
-        return False, f"linking failed\n{link_result.stdout}"
-
-    execution = run([str(program)])
-    if execution.returncode != 127:
-        return (
-            False,
-            f"instrumented program exited with {execution.returncode}, expected 127\n"
-            f"{execution.stdout}",
-        )
-    return True, ""
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--launcher", required=True)
     parser.add_argument("--tool", required=True)
     parser.add_argument("--compiler", required=True)
     parser.add_argument("--include", required=True)
-    parser.add_argument("--runtime", required=True)
     arguments = parser.parse_args()
 
     launcher = pathlib.Path(arguments.launcher).resolve()
     tool = pathlib.Path(arguments.tool).resolve()
     compiler = pathlib.Path(arguments.compiler).resolve()
     include = pathlib.Path(arguments.include).resolve()
-    runtime = pathlib.Path(arguments.runtime).resolve()
 
     with tempfile.TemporaryDirectory(prefix="returnguard-launcher-") as directory_name:
         directory = pathlib.Path(directory_name)
@@ -102,7 +77,6 @@ int main(void) {
 
         environment = dict(os.environ)
         environment["RETURNGUARD_TOOL"] = str(tool)
-        environment["RETURNGUARD_INCLUDE_DIR"] = str(include)
 
         compile_result = run(
             [
@@ -128,7 +102,7 @@ int main(void) {
             environment=environment,
         )
         if compile_result.returncode != 0:
-            return fail("instrumented compilation failed", compile_result.stdout)
+            return fail("analysis launcher compilation failed", compile_result.stdout)
         if not object_file.is_file():
             return fail("compiler launcher did not create the object file")
 
@@ -139,28 +113,26 @@ int main(void) {
         dependency_text = dependency_file.read_text(
             encoding="utf-8", errors="surrogateescape"
         )
-        if ".returnguard-" in dependency_text:
-            return fail(
-                "dependency output still references the temporary source",
-                dependency_text,
-            )
         if str(source) not in dependency_text:
             return fail("dependency output does not reference the original source")
 
         object_bytes = object_file.read_bytes()
         if str(source).encode() not in object_bytes:
             return fail("original source path was not preserved in the object file")
-        if b".returnguard-" in object_bytes:
-            return fail("temporary source path leaked into debug or macro data")
+        if "return value of 'unavailable_status' is consumed but not verified" not in (
+            compile_result.stdout
+        ):
+            return fail("launcher did not surface ReturnGuard diagnostics", compile_result.stdout)
 
-        linked, message = link_and_expect_fatal(
-            compiler=compiler,
-            object_file=object_file,
-            runtime=runtime,
-            program=program,
-        )
-        if not linked:
-            return fail("launcher-produced program failed", message)
+        link_result = run([str(compiler), str(object_file), "-o", str(program)])
+        if link_result.returncode != 0:
+            return fail("linking failed", link_result.stdout)
+        execution = run([str(program)])
+        if execution.returncode != 1:
+            return fail(
+                f"analysis launcher changed program behavior: exited {execution.returncode}",
+                execution.stdout,
+            )
 
         extensionless = directory / "extensionless"
         extensionless_object = directory / "extensionless.o"
@@ -193,17 +165,14 @@ int main(void) { return consume(fail()); }
         )
         if extensionless_compile.returncode != 0:
             return fail(
-                "extensionless -x c source was not instrumented",
+                "extensionless -x c source was not analyzed",
                 extensionless_compile.stdout,
             )
-        linked, message = link_and_expect_fatal(
-            compiler=compiler,
-            object_file=extensionless_object,
-            runtime=runtime,
-            program=extensionless_program,
-        )
-        if not linked:
-            return fail("extensionless launcher program failed", message)
+        if "return value of 'fail' is consumed but not verified" not in extensionless_compile.stdout:
+            return fail("extensionless source was not analyzed", extensionless_compile.stdout)
+        link_result = run([str(compiler), str(extensionless_object), "-o", str(extensionless_program)])
+        if link_result.returncode != 0:
+            return fail("extensionless linking failed", link_result.stdout)
 
         response_file = directory / "compile.rsp"
         response_object = directory / "response.o"
@@ -221,16 +190,16 @@ int main(void) { return consume(fail()); }
         )
         if response_result.returncode != 2:
             return fail(
-                "unsupported response-file compilation did not fail closed",
+                "unsupported response-file compilation did not fail predictably",
                 response_result.stdout,
             )
         if "response files are not supported" not in response_result.stdout:
             return fail(
-                "response-file failure did not explain the instrumentation limit",
+                "response-file failure did not explain the analysis limit",
                 response_result.stdout,
             )
         if response_object.exists():
-            return fail("response-file compilation bypassed instrumentation")
+            return fail("response-file compilation bypassed analysis")
 
     return 0
 

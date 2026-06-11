@@ -5,47 +5,26 @@ include("${CMAKE_CURRENT_LIST_DIR}/ReturnGuardTargets.cmake")
 set(ReturnGuard_TOOL "@PACKAGE_CMAKE_INSTALL_BINDIR@/returnguard")
 set(ReturnGuard_COMPILER_LAUNCHER
     "@PACKAGE_CMAKE_INSTALL_BINDIR@/returnguard-compiler-launcher")
-set(ReturnGuard_SITE_MAP_TOOL
-    "@PACKAGE_CMAKE_INSTALL_BINDIR@/returnguard-site-map")
 set(ReturnGuard_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 
-function(returnguard_harden_target target)
+function(returnguard_analyze_target target)
     if(NOT TARGET "${target}")
         message(FATAL_ERROR
-            "returnguard_harden_target: target '${target}' does not exist")
+            "returnguard_analyze_target: target '${target}' does not exist")
     endif()
 
-    set(_one_value_arguments SITE_MAP_DIR SOURCE_ROOT)
+    set(_one_value_arguments)
     cmake_parse_arguments(RG "" "${_one_value_arguments}" "" ${ARGN})
     if(RG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
-            "returnguard_harden_target: unknown arguments: ${RG_UNPARSED_ARGUMENTS}")
+            "returnguard_analyze_target: unknown arguments: ${RG_UNPARSED_ARGUMENTS}")
     endif()
-
-    if(RG_SITE_MAP_DIR)
-        set(_returnguard_site_map_dir "${RG_SITE_MAP_DIR}")
-    else()
-        set(_returnguard_site_map_dir
-            "${CMAKE_CURRENT_BINARY_DIR}/returnguard-sites/${target}")
-    endif()
-    if(RG_SOURCE_ROOT)
-        set(_returnguard_source_root "${RG_SOURCE_ROOT}")
-    else()
-        set(_returnguard_source_root "${CMAKE_SOURCE_DIR}")
-    endif()
-
-    file(MAKE_DIRECTORY "${_returnguard_site_map_dir}")
-    set_property(DIRECTORY APPEND PROPERTY
-        ADDITIONAL_CLEAN_FILES "${_returnguard_site_map_dir}")
 
     set(_returnguard_launcher
         "${CMAKE_COMMAND}"
         -E
         env
         "RETURNGUARD_TOOL=${ReturnGuard_TOOL}"
-        "RETURNGUARD_INCLUDE_DIR=${ReturnGuard_INCLUDE_DIR}"
-        "RETURNGUARD_SITE_MAP_DIR=${_returnguard_site_map_dir}"
-        "RETURNGUARD_SOURCE_ROOT=${_returnguard_source_root}"
         "${ReturnGuard_COMPILER_LAUNCHER}"
     )
 
@@ -53,9 +32,20 @@ function(returnguard_harden_target target)
         C_COMPILER_LAUNCHER "${_returnguard_launcher}")
     set_property(TARGET "${target}" PROPERTY
         CXX_COMPILER_LAUNCHER "${_returnguard_launcher}")
-    set_property(TARGET "${target}" PROPERTY
-        RETURNGUARD_SITE_MAP_DIR "${_returnguard_site_map_dir}")
-    target_link_libraries("${target}" PRIVATE ReturnGuard::runtime)
+    target_include_directories("${target}" PRIVATE "${ReturnGuard_INCLUDE_DIR}")
+endfunction()
+
+function(returnguard_harden_target target)
+    message(DEPRECATION
+        "returnguard_harden_target no longer rewrites or hardens code; "
+        "use returnguard_analyze_target instead")
+    set(_one_value_arguments SITE_MAP_DIR SOURCE_ROOT)
+    cmake_parse_arguments(RG "" "${_one_value_arguments}" "" ${ARGN})
+    if(RG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "returnguard_harden_target: unknown arguments: ${RG_UNPARSED_ARGUMENTS}")
+    endif()
+    returnguard_analyze_target("${target}")
 endfunction()
 
 check_required_components(ReturnGuard)

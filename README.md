@@ -214,16 +214,14 @@ return item->value;
 See [`docs/nullability.md`](docs/nullability.md) for supported guards,
 short-circuit behavior, annotations, and current boundaries.
 
-## Fail-closed instrumentation contracts
+## Function Contracts And Project Policy
 
-ReturnGuard can rewrite unchecked calls to known failure-returning APIs when
-`--instrument-output` is used. Built-in contracts stay conservative and focus on
-stable C, POSIX, stdio, and similar system APIs. Project-specific APIs can be
-added without changing source:
+ReturnGuard understands known failure-returning APIs and can be taught
+project-specific functions without changing source. Built-in contracts stay
+conservative and focus on stable C, POSIX, stdio, and similar system APIs:
 
 ```sh
 returnguard \
-    --instrument-output=instrumented.c \
     --contract=project_open=negative \
     --contract=Project::make_handle=null \
     file.c -- -std=c17
@@ -240,8 +238,7 @@ Project::make_handle=null
 Then pass it with:
 
 ```sh
-returnguard --contract-file=contracts.rg \
-    --instrument-output=instrumented.c file.c -- -std=c17
+returnguard --contract-file=contracts.rg file.c -- -std=c17
 ```
 
 For a single project policy file that also teaches the safety analysis about
@@ -257,8 +254,7 @@ lifetime project_free free
 ```
 
 ```sh
-returnguard --function-config=returnguard.rg \
-    --instrument-output=instrumented.c file.c -- -std=c17
+returnguard --function-config=returnguard.rg file.c -- -std=c17
 ```
 
 Use `negative` for signed integer APIs that fail with a value below zero, and

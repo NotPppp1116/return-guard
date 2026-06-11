@@ -22,7 +22,6 @@ class Expr;
 class ForStmt;
 class FunctionDecl;
 class IfStmt;
-class Rewriter;
 class SourceManager;
 class Stmt;
 class SwitchStmt;
@@ -38,15 +37,11 @@ namespace returnguard::internal {
 
 class CFGValueFlow;
 class HandlerFinder;
-class Instrumentation;
 class NullStateAnalysis;
-struct SiteMetadata;
 
 class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
   public:
-    explicit Analyzer(clang::ASTContext& context,
-                      clang::Rewriter* rewriter = nullptr,
-                      std::vector<SiteMetadata>* sites = nullptr);
+    explicit Analyzer(clang::ASTContext& context);
     ~Analyzer();
 
     [[nodiscard]] bool shouldVisitTemplateInstantiations() const;
@@ -149,7 +144,6 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
 
     clang::ASTContext& context_;
     clang::SourceManager& source_manager_;
-    std::unique_ptr<Instrumentation> instrumentation_;
     std::unordered_map<const clang::FunctionDecl*, Domain> domain_cache_;
     std::unordered_map<const clang::FunctionDecl*, std::unique_ptr<CFGValueFlow>> value_flow_cache_;
     std::unordered_set<const clang::FunctionDecl*> value_flow_failures_;

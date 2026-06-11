@@ -19,9 +19,6 @@ struct Options {
     bool explicit_void_is_handled = true;
     bool fail_on_diagnostics = false;
     bool color = true;
-    std::string instrument_output;
-    std::string site_map_output;
-    std::string site_root;
     std::vector<std::string> contracts;
     std::vector<std::string> lifetime_roles;
 };

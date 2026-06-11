@@ -285,12 +285,43 @@ std::unordered_set<unsigned> blocks_reaching(const clang::CFGBlock& target) {
 
     return reachable;
 }
+
+class ActiveVariableScope {
+  public:
+    ActiveVariableScope(std::unordered_set<const clang::VarDecl*>& active,
+                        const clang::VarDecl* variable)
+        : active_(active), variable_(variable == nullptr ? nullptr : variable->getCanonicalDecl()),
+          inserted_(variable_ != nullptr && active_.insert(variable_).second) {}
+
+    ~ActiveVariableScope() {
+        if (inserted_) {
+            active_.erase(variable_);
+        }
+    }
+
+    [[nodiscard]] bool inserted() const { return inserted_; }
+
+  private:
+    std::unordered_set<const clang::VarDecl*>& active_;
+    const clang::VarDecl* variable_;
+    bool inserted_;
+};
 } // namespace
 
 std::optional<Domain>
 ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::Expr* reference_site,
                                   std::unordered_set<const clang::FunctionDecl*>& active_functions,
                                   std::unordered_set<const clang::VarDecl*>& active_variables) {
+    if (variable == nullptr || reference_site == nullptr) {
+        return std::nullopt;
+    }
+
+    ActiveVariableScope active_scope(active_variables, variable);
+    if (!active_scope.inserted()) {
+        return std::nullopt;
+    }
+    variable = variable->getCanonicalDecl();
+
     if (llvm::isa<clang::ParmVarDecl>(variable)) {
         const auto* param = llvm::dyn_cast<clang::ParmVarDecl>(variable);
         const auto* function = llvm::dyn_cast<clang::FunctionDecl>(param->getDeclContext());
@@ -346,11 +377,6 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
         return std::nullopt;
     }
 
-    if (active_variables.contains(variable)) {
-        return std::nullopt;
-    }
-    active_variables.insert(variable);
-
     const clang::DeclContext* dc = variable->getDeclContext();
     const auto* function = llvm::dyn_cast_or_null<clang::FunctionDecl>(dc);
 
@@ -399,7 +425,6 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
         assignments = std::move(global_finder.assignments_);
     } else {
         if (!function || !function->hasBody()) {
-            active_variables.erase(variable);
             return std::nullopt;
         }
 
@@ -407,13 +432,11 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
         std::unique_ptr<clang::CFG> cfg = clang::CFG::buildCFG(
             function, function->getBody(), const_cast<clang::ASTContext*>(&context_), options);
         if (!cfg) {
-            active_variables.erase(variable);
             return std::nullopt;
         }
 
         const clang::CFGBlock* reference_block = block_containing_reference(*cfg, reference_site);
         if (reference_block == nullptr) {
-            active_variables.erase(variable);
             return std::nullopt;
         }
 
@@ -445,7 +468,6 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
     }
 
     if (!valid || assignments.empty()) {
-        active_variables.erase(variable);
         return std::nullopt;
     }
 
@@ -470,7 +492,6 @@ ValueSetInference::infer_variable(const clang::VarDecl* variable, const clang::E
         }
     }
 
-    active_variables.erase(variable);
     if (combined.finite)
         return combined;
     return std::nullopt;

@@ -23,7 +23,7 @@ static std::unordered_set<unsigned> blocks_reaching_cfg(const clang::CFG* cfg, c
     return reachable;
 }
 
-static bool var_mutated_in_block(const clang::CFGBlock& block, const clang::VarDecl* target, const clang::ASTContext& context) {
+static bool var_mutated_in_block(const clang::CFGBlock& block, const clang::VarDecl* target, const clang::ASTContext&) {
     for (const clang::CFGElement& element : block) {
         if (const auto stmt = element.getAs<clang::CFGStmt>()) {
             const clang::Stmt* s = stmt->getStmt();
@@ -35,7 +35,7 @@ static bool var_mutated_in_block(const clang::CFGBlock& block, const clang::VarD
             // Walk expressions inside the stmt to find unary ops and calls that touch the var.
             class Finder : public clang::RecursiveASTVisitor<Finder> {
               public:
-                Finder(const clang::VarDecl* target, const clang::ASTContext& ctx) : target_(target), ctx_(ctx) {}
+                explicit Finder(const clang::VarDecl* target) : target_(target) {}
                 bool VisitUnaryOperator(clang::UnaryOperator* op) {
                     if ((op->getOpcode() == clang::UO_AddrOf || op->isIncrementDecrementOp()) && referenced_variable(op->getSubExpr()) == target_) {
                         found_ = true; return false;
@@ -58,9 +58,8 @@ static bool var_mutated_in_block(const clang::CFGBlock& block, const clang::VarD
                 bool found() const { return found_; }
               private:
                 const clang::VarDecl* target_;
-                const clang::ASTContext& ctx_;
                 bool found_ = false;
-            } finder(target, context);
+            } finder(target);
             finder.TraverseStmt(const_cast<clang::Stmt*>(s));
             if (finder.found()) return true;
         }

@@ -42,6 +42,7 @@ add_returnguard_test(returnguard.enums enums.c practical 1 "missing STATUS_DENIE
 add_returnguard_test(returnguard.integers integers.c strict 1 "missing 32")
 add_returnguard_test(returnguard.inference inference.c strict 2 "no final else")
 add_returnguard_test(returnguard.inference_complex inference_complex.c strict 6 "missing")
+add_returnguard_clean_test(returnguard.value_inference_recursion value_inference_recursion.c practical)
 add_returnguard_test(returnguard.inference_cfg inference_cfg.c strict 1 "no final else")
 add_returnguard_test(returnguard.return_flow_cfg return_flow_cfg.c strict 3 "CFG-proven")
 add_returnguard_test(returnguard.if_chains if_chains.c practical 1 "missing 32")
@@ -179,27 +180,6 @@ add_test(
 )
 
 add_test(
-    NAME returnguard.invalid_instrumentation_contract
-    COMMAND
-        ${Python3_EXECUTABLE}
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_invalid_instrumentation_contract.py"
-        --tool "$<TARGET_FILE:returnguard>"
-        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_invalid_contract.c"
-        --include "${CMAKE_SOURCE_DIR}/include"
-)
-
-add_test(
-    NAME returnguard.site_metadata
-    COMMAND
-        ${Python3_EXECUTABLE}
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_site_metadata.py"
-        --tool "$<TARGET_FILE:returnguard>"
-        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation.c"
-        --invalid-source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_invalid_contract.c"
-        --include "${CMAKE_SOURCE_DIR}/include"
-)
-
-add_test(
     NAME returnguard.contract_policy
     COMMAND
         ${Python3_EXECUTABLE}
@@ -208,49 +188,4 @@ add_test(
         --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_system_namespace.cpp"
         --include "${CMAKE_SOURCE_DIR}/include"
         --compiler "${CMAKE_CXX_COMPILER}"
-)
-
-add_test(
-    NAME returnguard.readonly_launcher
-    COMMAND
-        ${Python3_EXECUTABLE}
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_readonly_launcher.py"
-        --launcher "${CMAKE_SOURCE_DIR}/scripts/returnguard_compiler_launcher.py"
-        --tool "$<TARGET_FILE:returnguard>"
-        --compiler "${CMAKE_C_COMPILER}"
-        --include "${CMAKE_SOURCE_DIR}/include"
-        --runtime "$<TARGET_FILE:returnguard_runtime>"
-)
-
-add_test(
-    NAME returnguard.allocator_policy
-    COMMAND
-        ${Python3_EXECUTABLE}
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_allocator_policy.py"
-        --tool "$<TARGET_FILE:returnguard>"
-        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_allocator_policy.c"
-        --include "${CMAKE_SOURCE_DIR}/include"
-        --compiler "${CMAKE_C_COMPILER}"
-)
-
-add_test(
-    NAME returnguard.overload_metadata
-    COMMAND
-        ${Python3_EXECUTABLE}
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_overload_metadata.py"
-        --tool "$<TARGET_FILE:returnguard>"
-        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_overloads.cpp"
-        --include "${CMAKE_SOURCE_DIR}/include"
-        --compiler "${CMAKE_CXX_COMPILER}"
-)
-
-add_test(
-    NAME returnguard.runtime_registry_shutdown
-    COMMAND
-        ${Python3_EXECUTABLE}
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_runtime_registry_shutdown.py"
-        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/runtime_registry_shutdown.c"
-        --include "${CMAKE_SOURCE_DIR}/include"
-        --compiler "${CMAKE_C_COMPILER}"
-        --runtime "$<TARGET_FILE:returnguard_runtime>"
 )
