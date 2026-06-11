@@ -101,18 +101,55 @@ cc main.o -L/usr/local/lib -lreturnguard_runtime -o program
 ```
 
 The shared failure entry point is declared `noreturn`, `cold`, `noinline`, and
-hidden. Its default behavior invokes a weak application hook and then calls
-`_Exit(127)`. Applications may provide a strong hook definition:
+hidden. Its default behavior wipes registered secret regions, invokes a weak
+application hook, and then calls `_Exit(127)`. Applications may provide a strong
+hook definition:
 
 ```c
 #include <returnguard/Runtime.h>
 
 void __rg_fatal_hook(uint32_t site_id, int saved_errno) {
-    /* Best-effort reporting and wiping of explicitly tracked secrets only. */
+    /* Registered secret regions have already been wiped here. */
+    /* Perform only minimal best-effort reporting. */
 }
 ```
 
 The hook must not attempt to resume execution.
+
+## Explicit secret regions
+
+The runtime keeps a fixed-capacity, allocation-free registry of memory regions
+that should be zeroed before the fatal hook runs:
+
+```c
+#include <returnguard/Runtime.h>
+
+unsigned char key[32];
+
+if (returnguard_register_secret(key, sizeof(key)) != RETURNGUARD_SECRET_OK) {
+    /* Do not place a secret in an unregistered region. */
+    return -1;
+}
+
+/* Fill and use key. */
+
+/* Explicitly wipe key during normal cleanup, then unregister it. */
+if (returnguard_unregister_secret(key) != RETURNGUARD_SECRET_OK) {
+    return -1;
+}
+```
+
+Register a region before writing sensitive bytes into it. Unregister it before
+freeing or invalidating the storage, and only after normal-path code has already
+made the contents non-sensitive. Duplicate registrations, invalid regions, a
+full registry, unknown regions, and a fatal wipe already in progress are
+reported through `ReturnGuardSecretResult`.
+
+Wiping is best effort. It covers the exact registered byte ranges, but it cannot
+promise to erase copies in registers, compiler temporaries, scratch stack
+storage, swap, core dumps, shared memory, or other processes. Registration and
+unregistration are thread-safe normal-path operations, but they are not intended
+for signal handlers. The fatal path does not acquire the registry update lock.
 
 ## Built-in contracts
 
