@@ -3,6 +3,10 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 
+#if ATOMIC_INT_LOCK_FREE != 2
+#error "ReturnGuard runtime requires always-lock-free atomic unsigned integers"
+#endif
+
 #define RETURNGUARD_SECRET_CAPACITY 64U
 #define RETURNGUARD_SECONDARY_FATAL_SPINS 1000000U
 
