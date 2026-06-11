@@ -11,7 +11,8 @@ namespace {
 
 const clang::DeclContext*
 skip_linkage_contexts(const clang::DeclContext* context) {
-    while (context != nullptr && context->isLinkageSpecContext()) {
+    while (context != nullptr &&
+           context->getDeclKind() == clang::Decl::LinkageSpec) {
         context = context->getParent();
     }
     return context;
