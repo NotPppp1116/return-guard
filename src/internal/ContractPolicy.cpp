@@ -49,8 +49,12 @@ bool is_std_context(const clang::FunctionDecl& function) {
 }
 
 bool is_standard_null_name(llvm::StringRef name) {
-    return name == "malloc" || name == "calloc" || name == "aligned_alloc" ||
-           name == "fopen" || name == "freopen" || name == "tmpfile";
+    /*
+     * malloc, calloc, aligned_alloc, and realloc are intentionally excluded.
+     * A zero-size request may legally return null, so those APIs need a
+     * size-aware rewrite that still evaluates every argument exactly once.
+     */
+    return name == "fopen" || name == "freopen" || name == "tmpfile";
 }
 
 bool is_global_only_null_name(llvm::StringRef name) {
