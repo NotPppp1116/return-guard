@@ -411,14 +411,75 @@ BranchConstraint condition_constraint(
         return {};
     }
 
-    // Support boolean variables initialized from pointer-null comparisons, e.g.
-    //  bool missing = ptr == NULL;
-    //  if (missing) { ... }
-    // In that case, analyze the initializer expression as the condition.
+    // Support boolean variables initialized from pointer-null comparisons, but only
+    // when the variable is provably immutable (const and not mutated/escaped). This
+    // avoids incorrectly treating the initializer as the current value when the
+    // variable may be reassigned, address-taken, or passed to mutating callees.
     if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
         if (const auto* var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl())) {
-            if (var->getInit() != nullptr) {
-                return condition_constraint(var->getInit(), state, target, context);
+            if (var->getInit() != nullptr && var->getType()->isConstQualified()) {
+                // Conservative mutation/escape finder: detect assignments, inc/dec,
+                // address-of uses, or passing the variable to indirect/possibly-mutating
+                // callees. If any are found, do not substitute the initializer.
+                class VarMutationFinder : public clang::RecursiveASTVisitor<VarMutationFinder> {
+                  public:
+                    explicit VarMutationFinder(const clang::VarDecl* target) : target_(target) {}
+
+                    bool VisitBinaryOperator(clang::BinaryOperator* op) {
+                        if (op->isAssignmentOp() && referenced_variable(op->getLHS()) == target_) {
+                            mutated_ = true;
+                            return false;
+                        }
+                        return true;
+                    }
+
+                    bool VisitUnaryOperator(clang::UnaryOperator* op) {
+                        if ((op->getOpcode() == clang::UO_AddrOf || op->isIncrementDecrementOp()) &&
+                            referenced_variable(op->getSubExpr()) == target_) {
+                            mutated_ = true;
+                            return false;
+                        }
+                        return true;
+                    }
+
+                    bool VisitCallExpr(clang::CallExpr* call) {
+                        for (unsigned i = 0; i < call->getNumArgs(); ++i) {
+                            const clang::Expr* arg = strip_expr(call->getArg(i));
+                            if (referenced_variable(arg) == target_) {
+                                const clang::FunctionDecl* callee = call->getDirectCallee();
+                                if (callee == nullptr) {
+                                    // Indirect call with the variable as arg: conservative.
+                                    mutated_ = true;
+                                    return false;
+                                }
+                                if (i >= callee->getNumParams()) {
+                                    mutated_ = true;
+                                    return false;
+                                }
+                                const clang::ParmVarDecl* param = callee->getParamDecl(i);
+                                // If parameter type is a pointer or reference and not const-qualified,
+                                // treat as potential mutation/escape.
+                                if (param->getType()->isPointerType() && !param->getType().isConstQualified()) {
+                                    mutated_ = true;
+                                    return false;
+                                }
+                            }
+                        }
+                        return true;
+                    }
+
+                    [[nodiscard]] bool mutated() const { return mutated_; }
+
+                  private:
+                    const clang::VarDecl* target_;
+                    bool mutated_ = false;
+                };
+
+                VarMutationFinder finder(var);
+                finder.TraverseDecl(const_cast<clang::TranslationUnitDecl*>(context.getTranslationUnitDecl()));
+                if (!finder.mutated()) {
+                    return condition_constraint(var->getInit(), state, target, context);
+                }
             }
         }
     }
