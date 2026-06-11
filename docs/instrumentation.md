@@ -248,13 +248,15 @@ null result is unambiguously failure, such as `fopen`, `freopen`, `tmpfile`,
 ```c
 #include <returnguard/Contracts.h>
 
-void* allocate_packet(size_t size) RETURNGUARD_FAILS_NULL;
+void* allocate_nonzero_packet(size_t size) RETURNGUARD_FAILS_NULL;
 int commit_database(void) RETURNGUARD_FAILS_NEGATIVE;
 ```
 
-A null contract requires a pointer return type. A negative contract requires a
-signed integer return type. Invalid declarations stop transformation with an
-error instead of silently bypassing the contract.
+An explicitly annotated allocation wrapper must reject zero sizes or otherwise
+define every null result as failure. A null contract requires a pointer return
+type. A negative contract requires a signed integer return type. Invalid
+declarations stop transformation with an error instead of silently bypassing
+the contract.
 
 `malloc`, `calloc`, `aligned_alloc`, and `realloc` are not automatically wrapped.
 A zero-size request may legally return null, so they require a future size-aware
