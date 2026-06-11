@@ -74,6 +74,7 @@ returnguard_harden_target(hardened)
 #include <returnguard/Runtime.h>
 
 static unsigned char secret[] = {1U, 2U, 3U, 4U};
+static unsigned char removed[] = {5U, 6U, 7U, 8U};
 
 static int unavailable(void) RETURNGUARD_FAILS_NEGATIVE;
 static int unavailable(void) { return -1; }
@@ -84,10 +85,13 @@ void __rg_fatal_hook(uint32_t site_id, int saved_errno) {
     (void)saved_errno;
     const char wiped[] = "secret-wiped\\n";
     const char not_wiped[] = "secret-not-wiped\\n";
-    const int was_wiped =
+    const int registered_was_wiped =
         secret[0] == 0U && secret[1] == 0U &&
         secret[2] == 0U && secret[3] == 0U;
-    if (was_wiped != 0) {
+    const int removed_was_preserved =
+        removed[0] == 5U && removed[1] == 6U &&
+        removed[2] == 7U && removed[3] == 8U;
+    if (registered_was_wiped != 0 && removed_was_preserved != 0) {
         (void)write(2, wiped, sizeof(wiped) - 1U);
     } else {
         (void)write(2, not_wiped, sizeof(not_wiped) - 1U);
@@ -102,6 +106,17 @@ int main(void) {
     if (returnguard_register_secret(secret, sizeof(secret)) !=
         RETURNGUARD_SECRET_ALREADY_REGISTERED) {
         return 11;
+    }
+    if (returnguard_register_secret(removed, sizeof(removed)) !=
+        RETURNGUARD_SECRET_OK) {
+        return 12;
+    }
+    if (returnguard_unregister_secret(removed) != RETURNGUARD_SECRET_OK) {
+        return 13;
+    }
+    if (returnguard_unregister_secret(removed) !=
+        RETURNGUARD_SECRET_NOT_FOUND) {
+        return 14;
     }
     return consume(unavailable());
 }
