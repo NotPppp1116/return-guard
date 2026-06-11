@@ -96,9 +96,7 @@ bool write_site_map(clang::CompilerInstance& compiler,
                   return left.id < right.id;
               });
 
-    output << "{\n  \"schema_version\": 1,\n  \"site_root\": ";
-    write_json_string(output, options().site_root);
-    output << ",\n  \"sites\": [";
+    output << "{\n  \"schema_version\": 1,\n  \"sites\": [";
 
     for (std::size_t index = 0U; index < sorted.size(); ++index) {
         const internal::SiteMetadata& site = sorted[index];
