@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ContractPolicy.hpp"
 #include "Model.hpp"
 #include "SiteMetadata.hpp"
 
@@ -27,11 +28,6 @@ class Instrumentation final {
                                 const CheckResult& handling);
 
   private:
-    enum class FailurePredicate {
-        Null,
-        Negative,
-    };
-
     [[nodiscard]] bool should_instrument(const CheckResult& handling) const;
     [[nodiscard]] bool validate_contract(const clang::CallExpr* call,
                                          FailurePredicate predicate) const;
