@@ -213,3 +213,14 @@ add_test(
         --include "${CMAKE_SOURCE_DIR}/include"
         --compiler "${CMAKE_CXX_COMPILER}"
 )
+
+add_test(
+    NAME returnguard.runtime_registry_shutdown
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_runtime_registry_shutdown.py"
+        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/runtime_registry_shutdown.c"
+        --include "${CMAKE_SOURCE_DIR}/include"
+        --compiler "${CMAKE_C_COMPILER}"
+        --runtime "$<TARGET_FILE:returnguard_runtime>"
+)
