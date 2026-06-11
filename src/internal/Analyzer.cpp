@@ -3,6 +3,7 @@
 #include "CFGValueFlow.hpp"
 #include "Instrumentation.hpp"
 #include "NullStateAnalysis.hpp"
+#include "SiteMetadata.hpp"
 
 #include <returnguard/Options.hpp>
 
@@ -12,13 +13,17 @@
 #include <clang/Rewrite/Core/Rewriter.h>
 
 #include <memory>
+#include <vector>
 
 namespace returnguard::internal {
 
-Analyzer::Analyzer(clang::ASTContext& context, clang::Rewriter* rewriter)
+Analyzer::Analyzer(clang::ASTContext& context,
+                   clang::Rewriter* rewriter,
+                   std::vector<SiteMetadata>* sites)
     : context_(context), source_manager_(context.getSourceManager()) {
-    if (rewriter != nullptr) {
-        instrumentation_ = std::make_unique<Instrumentation>(context, *rewriter);
+    if (rewriter != nullptr && sites != nullptr) {
+        instrumentation_ =
+            std::make_unique<Instrumentation>(context, *rewriter, *sites);
     }
 }
 
