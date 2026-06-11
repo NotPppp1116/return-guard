@@ -13,6 +13,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -83,6 +84,20 @@ llvm::cl::opt<std::string> site_root(
     llvm::cl::init(""),
     llvm::cl::cat(category));
 
+llvm::cl::list<std::string> contract_options(
+    "contract",
+    llvm::cl::desc(
+        "Add an instrumentation failure contract as qualified_name=null or qualified_name=negative"),
+    llvm::cl::ZeroOrMore,
+    llvm::cl::cat(category));
+
+llvm::cl::list<std::string> contract_file_options(
+    "contract-file",
+    llvm::cl::desc(
+        "Read instrumentation failure contracts from a file using qualified_name=null lines"),
+    llvm::cl::ZeroOrMore,
+    llvm::cl::cat(category));
+
 returnguard::Mode parse_mode(llvm::StringRef value) {
     if (value == "practical") {
         return returnguard::Mode::Practical;
@@ -97,6 +112,53 @@ returnguard::Mode parse_mode(llvm::StringRef value) {
     llvm::errs() << "returnguard: invalid --mode='" << value
                  << "' (expected practical, strict, or ignored-only)\n";
     std::exit(2);
+}
+
+bool valid_contract_spec(llvm::StringRef value) {
+    const auto [name, predicate] = value.split('=');
+    return !name.trim().empty() &&
+           (predicate.trim() == "null" || predicate.trim() == "negative");
+}
+
+std::vector<std::string> collect_contracts() {
+    std::vector<std::string> contracts(contract_options.begin(), contract_options.end());
+
+    for (const std::string& path : contract_file_options) {
+        std::ifstream input(path);
+        if (!input) {
+            llvm::errs() << "returnguard: could not read --contract-file='" << path << "'\n";
+            std::exit(2);
+        }
+
+        std::string line;
+        unsigned line_number = 0;
+        while (std::getline(input, line)) {
+            ++line_number;
+            llvm::StringRef text(line);
+            text = text.split('#').first.trim();
+            if (text.empty()) {
+                continue;
+            }
+            if (!valid_contract_spec(text)) {
+                llvm::errs() << "returnguard: invalid contract in " << path << ':'
+                             << line_number
+                             << " (expected qualified_name=null or qualified_name=negative)\n";
+                std::exit(2);
+            }
+            contracts.push_back(text.str());
+        }
+    }
+
+    for (const std::string& contract : contracts) {
+        if (!valid_contract_spec(contract)) {
+            llvm::errs()
+                << "returnguard: invalid --contract='" << contract
+                << "' (expected qualified_name=null or qualified_name=negative)\n";
+            std::exit(2);
+        }
+    }
+
+    return contracts;
 }
 
 } // namespace
@@ -154,6 +216,7 @@ int main(int argc, const char** argv) {
         .instrument_output = instrument_output,
         .site_map_output = site_map_output,
         .site_root = site_root,
+        .contracts = collect_contracts(),
     });
 
     clang::tooling::ClangTool tool(

@@ -212,6 +212,41 @@ return item->value;
 See [`docs/nullability.md`](docs/nullability.md) for supported guards,
 short-circuit behavior, annotations, and current boundaries.
 
+## Fail-closed instrumentation contracts
+
+ReturnGuard can rewrite unchecked calls to known failure-returning APIs when
+`--instrument-output` is used. Built-in contracts stay conservative and focus on
+stable C, POSIX, stdio, and similar system APIs. Project-specific APIs can be
+added without changing source:
+
+```sh
+returnguard \
+    --instrument-output=instrumented.c \
+    --contract=project_open=negative \
+    --contract=Project::make_handle=null \
+    file.c -- -std=c17
+```
+
+For larger projects, put one contract per line in a file:
+
+```text
+# contracts.rg
+project_open=negative
+Project::make_handle=null
+```
+
+Then pass it with:
+
+```sh
+returnguard --contract-file=contracts.rg \
+    --instrument-output=instrumented.c file.c -- -std=c17
+```
+
+Use `negative` for signed integer APIs that fail with a value below zero, and
+`null` for pointer APIs where `NULL` means failure. Source annotations with
+`RETURNGUARD_FAILS_NULL` and `RETURNGUARD_FAILS_NEGATIVE` still work and take
+precedence when you control the declaration.
+
 ## Important limitations
 
 This is not a complete proof system for C or C++.

@@ -397,7 +397,13 @@ bool Analyzer::call_is_discarded_expression(const clang::CallExpr* call) const {
 }
 
 bool Analyzer::call_is_operator(const clang::CallExpr* call) const {
-    return llvm::isa<clang::CXXOperatorCallExpr>(call);
+    if (llvm::isa<clang::CXXOperatorCallExpr>(call)) {
+        return true;
+    }
+    const auto* method = llvm::dyn_cast_or_null<clang::CXXMethodDecl>(
+        call == nullptr ? nullptr : call->getDirectCallee());
+    return method != nullptr &&
+           (method->isOverloadedOperator() || llvm::isa<clang::CXXConversionDecl>(method));
 }
 
 } // namespace returnguard::internal

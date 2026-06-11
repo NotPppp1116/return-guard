@@ -60,7 +60,8 @@ bool Analyzer::VisitCallExpr(clang::CallExpr* call) {
 }
 
 bool Analyzer::VisitFunctionDecl(clang::FunctionDecl* function) {
-    if (function != nullptr && function->hasBody()) {
+    if (function != nullptr && function->hasBody() &&
+        should_analyze_location(function->getLocation())) {
         analyze_safety(function);
     }
     return true;

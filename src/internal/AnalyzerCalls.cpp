@@ -8,9 +8,11 @@
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
+#include <clang/AST/DeclCXX.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/SourceManager.h>
+#include <llvm/ADT/StringRef.h>
 
 #include <optional>
 #include <sstream>
@@ -28,7 +30,34 @@ CheckResult exhaustive_result() {
 }
 
 bool is_commonly_ignored_system_function(const clang::FunctionDecl* function) {
-    if (function == nullptr || function->getIdentifier() == nullptr) {
+    if (function == nullptr) {
+        return false;
+    }
+
+    bool in_std_namespace = false;
+    bool in_testing_namespace = false;
+    for (const clang::DeclContext* context = function->getDeclContext(); context != nullptr;
+         context = context->getParent()) {
+        const auto* namespace_declaration = llvm::dyn_cast<clang::NamespaceDecl>(context);
+        if (namespace_declaration == nullptr) {
+            continue;
+        }
+        if (namespace_declaration->getName() == "std") {
+            in_std_namespace = true;
+        }
+        if (namespace_declaration->getName() == "testing") {
+            in_testing_namespace = true;
+        }
+    }
+
+    if (in_testing_namespace) {
+        return true;
+    }
+    if (in_std_namespace && llvm::isa<clang::CXXConversionDecl>(function)) {
+        return true;
+    }
+
+    if (function->getIdentifier() == nullptr) {
         return false;
     }
     const llvm::StringRef name = function->getName();
@@ -36,7 +65,81 @@ bool is_commonly_ignored_system_function(const clang::FunctionDecl* function) {
         "printf",    "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf", "vsprintf",
         "vsnprintf", "memcpy",  "memmove", "memset",   "strcpy",  "strncpy",  "strcat",
         "strncat",   "putchar", "putc",    "puts",     "fwrite"};
-    return ignored_names.contains(name.str());
+    if (ignored_names.contains(name.str())) {
+        return true;
+    }
+
+    static const std::unordered_set<std::string> ignored_wayland_names = {
+        "wl_client_get_object",
+        "wl_display_get_event_loop",
+        "wl_display_get_fd",
+        "wl_display_get_registry",
+        "wl_display_next_serial",
+        "wl_fixed_from_double",
+        "wl_fixed_from_int",
+        "wl_fixed_to_double",
+        "wl_proxy_get_version",
+        "wl_resource_get_user_data",
+        "wl_resource_get_version",
+    };
+    if (ignored_wayland_names.contains(name.str())) {
+        return true;
+    }
+
+    if (!in_std_namespace) {
+        return false;
+    }
+
+    static const std::unordered_set<std::string> ignored_std_names = {
+        "abs",
+        "any_cast",
+        "begin",
+        "ceil",
+        "duration_cast",
+        "empty",
+        "size",
+        "length",
+        "data",
+        "c_str",
+        "substr",
+        "find",
+        "rfind",
+        "find_first_of",
+        "find_first_not_of",
+        "find_last_of",
+        "find_last_not_of",
+        "starts_with",
+        "ends_with",
+        "contains",
+        "compare",
+        "emplace",
+        "end",
+        "exists",
+        "str",
+        "format",
+        "has_value",
+        "make_pair",
+        "make_tuple",
+        "next",
+        "pow",
+        "ref",
+        "round",
+        "string",
+        "to_string",
+        "stoi",
+        "stol",
+        "stoll",
+        "stoul",
+        "stoull",
+        "stof",
+        "stod",
+        "stold",
+        "erase",
+        "erase_if",
+        "value_or",
+        "what",
+    };
+    return ignored_std_names.contains(name.str());
 }
 
 } // namespace

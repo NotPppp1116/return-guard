@@ -2,11 +2,17 @@
 
 #include "AstUtils.hpp"
 
+#include <returnguard/Options.hpp>
+
 #include <clang/AST/Attr.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/Basic/SourceManager.h>
 #include <llvm/ADT/StringRef.h>
+
+#include <initializer_list>
+#include <optional>
+#include <string>
 
 namespace returnguard::internal {
 namespace {
@@ -37,10 +43,23 @@ bool is_std_context(const clang::FunctionDecl& function) {
                 skip_linkage_contexts(namespace_declaration->getParent());
             return parent != nullptr && parent->isTranslationUnit();
         }
+
         if (!namespace_declaration->isInline()) {
             return false;
         }
+
         context = skip_linkage_contexts(namespace_declaration->getParent());
+    }
+
+    return false;
+}
+
+bool has_any_name(const clang::FunctionDecl& function,
+                  std::initializer_list<llvm::StringRef> names) {
+    for (llvm::StringRef name : names) {
+        if (has_identifier_name(&function, name)) {
+            return true;
+        }
     }
     return false;
 }
@@ -50,12 +69,49 @@ std::optional<FailurePredicate> annotation_contract(const clang::FunctionDecl& f
         for (const clang::AnnotateAttr* attribute :
              redeclaration->specific_attrs<clang::AnnotateAttr>()) {
             const llvm::StringRef annotation = attribute->getAnnotation();
+
             if (annotation == "returnguard.failure:null") {
                 return FailurePredicate::Null;
             }
+
             if (annotation == "returnguard.failure:negative") {
                 return FailurePredicate::Negative;
             }
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<FailurePredicate> parse_predicate(llvm::StringRef value) {
+    value = value.trim();
+    if (value == "null") {
+        return FailurePredicate::Null;
+    }
+    if (value == "negative") {
+        return FailurePredicate::Negative;
+    }
+    return std::nullopt;
+}
+
+bool contract_name_matches(const clang::FunctionDecl& function, llvm::StringRef name) {
+    name = name.trim();
+    if (name.empty()) {
+        return false;
+    }
+
+    if (function.getQualifiedNameAsString() == name.str()) {
+        return true;
+    }
+    return function.getIdentifier() != nullptr && function.getName() == name;
+}
+
+std::optional<FailurePredicate> configured_contract(const clang::FunctionDecl& function) {
+    for (const std::string& contract : returnguard::options().contracts) {
+        const auto [name, predicate_text] = llvm::StringRef(contract).split('=');
+        const std::optional<FailurePredicate> predicate = parse_predicate(predicate_text);
+        if (predicate.has_value() && contract_name_matches(function, name)) {
+            return predicate;
         }
     }
     return std::nullopt;
@@ -68,6 +124,9 @@ std::optional<FailurePredicate> failure_contract(const clang::FunctionDecl& func
     if (const std::optional<FailurePredicate> annotation = annotation_contract(function)) {
         return annotation;
     }
+    if (const std::optional<FailurePredicate> configured = configured_contract(function)) {
+        return configured;
+    }
 
     if (!source_manager.isInSystemHeader(function.getLocation())) {
         return std::nullopt;
@@ -76,36 +135,104 @@ std::optional<FailurePredicate> failure_contract(const clang::FunctionDecl& func
     const bool global = is_global_context(function);
     const bool standard = is_std_context(function);
 
-    if ((global || standard) &&
-        (has_identifier_name(&function, "fopen") || has_identifier_name(&function, "freopen") ||
-         has_identifier_name(&function, "tmpfile"))) {
+    if ((global || standard) && has_any_name(function, {
+                                                           "fopen",
+                                                           "freopen",
+                                                           "fmemopen",
+                                                           "open_memstream",
+                                                           "tmpfile",
+                                                       })) {
         return FailurePredicate::Null;
     }
-    if (global &&
-        (has_identifier_name(&function, "fdopen") || has_identifier_name(&function, "opendir"))) {
+
+    if (global && has_any_name(function, {
+                                             "fdopen",
+                                             "popen",
+                                             "opendir",
+                                             "fdopendir",
+                                             "dlopen",
+                                             "wl_client_create",
+                                             "wl_display_create",
+                                             "wl_event_loop_add_fd",
+                                             "wl_event_loop_add_idle",
+                                             "wl_event_loop_add_signal",
+                                             "wl_event_loop_add_timer",
+                                             "wl_registry_bind",
+                                             "wl_resource_create",
+                                         })) {
         return FailurePredicate::Null;
     }
-    if ((global || standard) &&
-        (has_identifier_name(&function, "printf") || has_identifier_name(&function, "fprintf") ||
-         has_identifier_name(&function, "sprintf") || has_identifier_name(&function, "snprintf") ||
-         has_identifier_name(&function, "vprintf") || has_identifier_name(&function, "vfprintf") ||
-         has_identifier_name(&function, "vsprintf") ||
-         has_identifier_name(&function, "vsnprintf") || has_identifier_name(&function, "putchar") ||
-         has_identifier_name(&function, "putc") || has_identifier_name(&function, "puts") ||
-         has_identifier_name(&function, "fclose") || has_identifier_name(&function, "fflush"))) {
+
+    if ((global || standard) && has_any_name(function, {
+                                                           "printf",
+                                                           "fprintf",
+                                                           "sprintf",
+                                                           "snprintf",
+                                                           "vprintf",
+                                                           "vfprintf",
+                                                           "vsprintf",
+                                                           "vsnprintf",
+                                                           "putchar",
+                                                           "putc",
+                                                           "puts",
+                                                           "fclose",
+                                                           "fflush",
+                                                           "fputc",
+                                                           "fputs",
+                                                           "remove",
+                                                           "rename",
+                                                       })) {
         return FailurePredicate::Negative;
     }
-    if (global &&
-        (has_identifier_name(&function, "open") || has_identifier_name(&function, "open64") ||
-         has_identifier_name(&function, "creat") || has_identifier_name(&function, "close") ||
-         has_identifier_name(&function, "fsync") || has_identifier_name(&function, "fdatasync") ||
-         has_identifier_name(&function, "ftruncate") ||
-         has_identifier_name(&function, "truncate") || has_identifier_name(&function, "dup") ||
-         has_identifier_name(&function, "dup2") || has_identifier_name(&function, "dup3") ||
-         has_identifier_name(&function, "socket") || has_identifier_name(&function, "pipe") ||
-         has_identifier_name(&function, "pipe2"))) {
+
+    if (global && has_any_name(function, {
+                                             "open",           "open64",
+                                             "openat",         "openat64",
+                                             "creat",          "creat64",
+                                             "close",          "fsync",
+                                             "fdatasync",      "ftruncate",
+                                             "truncate",       "dup",
+                                             "dup2",           "dup3",
+                                             "socket",         "socketpair",
+                                             "bind",           "listen",
+                                             "connect",        "accept",
+                                             "accept4",        "shutdown",
+                                             "getsockname",    "getpeername",
+                                             "setsockopt",     "getsockopt",
+                                             "pipe",           "pipe2",
+                                             "eventfd",        "eventfd_read",
+                                             "eventfd_write",  "inotify_init",
+                                             "inotify_init1",  "epoll_create",
+                                             "epoll_create1",  "epoll_ctl",
+                                             "timerfd_create", "timerfd_settime",
+                                             "signalfd",       "chdir",
+                                             "fchdir",         "mkdir",
+                                             "rmdir",          "unlink",
+                                             "unlinkat",       "link",
+                                             "linkat",         "symlink",
+                                             "symlinkat",      "readlink",
+                                             "readlinkat",     "chmod",
+                                             "fchmod",         "fchmodat",
+                                             "chown",          "fchown",
+                                             "lchown",         "fchownat",
+                                             "access",         "faccessat",
+                                             "stat",           "lstat",
+                                             "fstat",          "fstatat",
+                                             "poll",           "ppoll",
+                                             "select",         "pselect",
+                                             "wl_array_add",   "wl_display_dispatch",
+                                             "wl_display_dispatch_pending",
+                                             "wl_display_flush",
+                                             "wl_display_read_events",
+                                             "wl_display_roundtrip",
+                                             "wl_event_source_fd_update",
+                                             "wl_event_source_remove",
+                                             "wl_event_source_timer_update",
+                                             "wl_proxy_add_listener",
+                                         })) {
         return FailurePredicate::Negative;
     }
+
     return std::nullopt;
 }
 

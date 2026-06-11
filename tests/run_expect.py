@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
         default="warning",
     )
     parser.add_argument("--fail-on-diagnostics", action="store_true")
+    parser.add_argument("--tool-arg", action="append", default=[])
     parser.add_argument("--expect", action="append", default=[])
     parser.add_argument("--reject", action="append", default=[])
     return parser.parse_args()
@@ -36,6 +37,7 @@ def main() -> int:
     ]
     if args.fail_on_diagnostics:
         command.append("--fail-on-diagnostics")
+    command.extend(args.tool_arg)
 
     command.extend(
         [

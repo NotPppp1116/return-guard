@@ -1,10 +1,15 @@
 #include <returnguard/Nullability.h>
+#include <returnguard/Contracts.h>
 
 struct node {
     int value;
 };
 
 node* RETURNGUARD_NULLABLE nullable_node();
+
+struct pointer_like {
+    node* operator->() RETURNGUARD_FAILS_NULL;
+};
 
 int unchecked_cpp() {
     node* result = nullable_node();
@@ -36,6 +41,10 @@ int unsafe_after_join(bool enabled) {
 
 int unchecked_direct_cpp() {
     return nullable_node()->value;
+}
+
+int operator_arrow_is_opt_in(pointer_like pointer) {
+    return pointer->value;
 }
 
 node* inferred_nullable_node() {

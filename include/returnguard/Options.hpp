@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace returnguard {
 
@@ -21,6 +22,7 @@ struct Options {
     std::string instrument_output;
     std::string site_map_output;
     std::string site_root;
+    std::vector<std::string> contracts;
 };
 
 void set_options(Options options);

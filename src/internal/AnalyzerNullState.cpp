@@ -1,5 +1,6 @@
 #include "Analyzer.hpp"
 
+#include "ContractPolicy.hpp"
 #include "NullStateAnalysis.hpp"
 #include "ReturnCollector.hpp"
 
@@ -128,7 +129,15 @@ bool Analyzer::call_returns_nullable_pointer(const clang::CallExpr* call) const 
     }
 
     const clang::FunctionDecl* function = call->getDirectCallee();
-    return function != nullptr && is_nullable_function(function);
+    if (function == nullptr) {
+        return false;
+    }
+
+    if (failure_contract(*function, source_manager_) == FailurePredicate::Null) {
+        return true;
+    }
+
+    return is_nullable_function(function);
 }
 
 bool Analyzer::is_nullable_function(const clang::FunctionDecl* function) const {
@@ -276,7 +285,9 @@ NullStateAnalysis* Analyzer::null_state_analysis(const clang::FunctionDecl* func
 }
 
 void Analyzer::analyze_nullable_call(const clang::CallExpr* call) {
-    if (!should_analyze_location(call->getExprLoc()) || !call_returns_nullable_pointer(call)) {
+    if (!should_analyze_location(call->getExprLoc()) ||
+        (!returnguard::options().include_operators && call_is_operator(call)) ||
+        !call_returns_nullable_pointer(call)) {
         return;
     }
 
