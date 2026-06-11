@@ -7,6 +7,7 @@
 #include <clang/AST/Attr.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/Expr.h>
+#include <clang/AST/ParentMapContext.h>
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/SourceManager.h>
 #include <clang/Lex/Lexer.h>
