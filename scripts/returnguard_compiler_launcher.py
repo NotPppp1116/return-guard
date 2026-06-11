@@ -11,6 +11,16 @@ import tempfile
 from collections.abc import Sequence
 
 SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".c++", ".C"})
+SOURCE_LANGUAGES = frozenset(
+    {
+        "c",
+        "c-header",
+        "cpp-output",
+        "c++",
+        "c++-header",
+        "c++-cpp-output",
+    }
+)
 OPTIONS_WITH_VALUE = frozenset(
     {
         "-o",
@@ -45,6 +55,7 @@ TOOL_ONLY_DROPPED_OPTIONS = frozenset(
 TOOL_ONLY_DROPPED_WITH_VALUE = frozenset(
     {"-o", "-MF", "-MT", "-MQ", "-MJ", "--serialize-diagnostics"}
 )
+TOOL_ONLY_JOINED_PREFIXES = ("-MF", "-MT", "-MQ", "-MJ")
 
 
 class LauncherError(RuntimeError):
@@ -79,10 +90,6 @@ def runtime_include_directory() -> pathlib.Path:
     return include
 
 
-def option_consumes_next(argument: str) -> bool:
-    return argument in OPTIONS_WITH_VALUE
-
-
 def positional_arguments(arguments: Sequence[str]) -> list[tuple[int, str]]:
     positional: list[tuple[int, str]] = []
     index = 0
@@ -97,7 +104,7 @@ def positional_arguments(arguments: Sequence[str]) -> list[tuple[int, str]]:
             after_separator = True
             index += 1
             continue
-        if option_consumes_next(argument):
+        if argument in OPTIONS_WITH_VALUE:
             index += 2
             continue
         if argument.startswith("-"):
@@ -108,15 +115,46 @@ def positional_arguments(arguments: Sequence[str]) -> list[tuple[int, str]]:
     return positional
 
 
+def explicit_language(arguments: Sequence[str]) -> str | None:
+    language: str | None = None
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "-x" and index + 1 < len(arguments):
+            language = arguments[index + 1]
+            index += 2
+            continue
+        if argument.startswith("-x") and len(argument) > 2:
+            language = argument[2:]
+        index += 1
+    return language
+
+
 def source_argument(arguments: Sequence[str]) -> tuple[int, pathlib.Path] | None:
+    if any(argument.startswith("@") for argument in arguments):
+        raise LauncherError(
+            "compiler response files are not supported yet; refusing to bypass instrumentation"
+        )
+
+    language = explicit_language(arguments)
+    language_selects_source = language in SOURCE_LANGUAGES
     candidates: list[tuple[int, pathlib.Path]] = []
     for index, argument in positional_arguments(arguments):
+        if argument == "-" and language_selects_source:
+            raise LauncherError(
+                "source from standard input is not supported by the hardened launcher"
+            )
+
         path = pathlib.Path(argument)
-        if path.suffix not in SOURCE_SUFFIXES:
+        if path.suffix not in SOURCE_SUFFIXES and not language_selects_source:
             continue
         if ".returnguard-" in path.name:
             continue
-        candidates.append((index, path))
+
+        absolute = path if path.is_absolute() else pathlib.Path.cwd() / path
+        if not absolute.is_file():
+            continue
+        candidates.append((index, absolute.resolve(strict=False)))
 
     if not candidates:
         return None
@@ -124,11 +162,7 @@ def source_argument(arguments: Sequence[str]) -> tuple[int, pathlib.Path] | None
         raise LauncherError(
             "compiler launcher supports exactly one source file per compilation"
         )
-
-    index, path = candidates[0]
-    if not path.is_absolute():
-        path = pathlib.Path.cwd() / path
-    return index, path.resolve(strict=False)
+    return candidates[0]
 
 
 def tool_arguments(arguments: Sequence[str], source_index: int) -> list[str]:
@@ -146,9 +180,9 @@ def tool_arguments(arguments: Sequence[str], source_index: int) -> list[str]:
             index += 2
             continue
         if any(
-            argument.startswith(prefix)
-            for prefix in ("-o", "-MF", "-MT", "-MQ", "-MJ")
-        ) and argument not in {"-ObjC", "-ObjC++"}:
+            argument.startswith(prefix) and len(argument) > len(prefix)
+            for prefix in TOOL_ONLY_JOINED_PREFIXES
+        ):
             index += 1
             continue
         filtered.append(argument)
@@ -163,6 +197,18 @@ def dependency_file(arguments: Sequence[str]) -> pathlib.Path | None:
         if argument.startswith("-MF") and len(argument) > 3:
             return pathlib.Path(argument[3:])
     return None
+
+
+def insert_compiler_options(
+    arguments: Sequence[str], additional: Sequence[str]
+) -> list[str]:
+    result = list(arguments)
+    try:
+        separator = result.index("--")
+    except ValueError:
+        separator = len(result)
+    result[separator:separator] = additional
+    return result
 
 
 def add_original_line_mapping(transformed: pathlib.Path, original: pathlib.Path) -> None:
@@ -216,9 +262,6 @@ def main() -> int:
             return run_passthrough(compiler, arguments)
 
         source_index, original_source = source
-        if not original_source.is_file():
-            raise LauncherError(f"source file does not exist: {original_source}")
-
         returnguard = executable_from_environment("RETURNGUARD_TOOL", "returnguard")
         include = runtime_include_directory()
 
@@ -248,12 +291,23 @@ def main() -> int:
             )
             if transform.returncode != 0:
                 return transform.returncode
+            if not temporary_source.is_file() or temporary_source.stat().st_size == 0:
+                raise LauncherError("ReturnGuard produced no transformed source")
 
             add_original_line_mapping(temporary_source, original_source)
 
             compiler_arguments = list(arguments)
             compiler_arguments[source_index] = str(temporary_source)
-            compiler_arguments.extend(["-I", str(include)])
+            path_options = [
+                "-I",
+                str(include),
+                f"-ffile-prefix-map={temporary_source}={original_source}",
+                f"-fdebug-prefix-map={temporary_source}={original_source}",
+                f"-fmacro-prefix-map={temporary_source}={original_source}",
+            ]
+            compiler_arguments = insert_compiler_options(
+                compiler_arguments, path_options
+            )
             result = subprocess.run(
                 [compiler, *compiler_arguments],
                 check=False,
