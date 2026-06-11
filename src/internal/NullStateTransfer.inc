@@ -260,7 +260,7 @@ void transfer_block(
     const NullSource& target,
     std::unordered_set<const clang::Expr*>* unsafe,
     const clang::ASTContext& context,
-    const clang::CFG* cfg) {
+    const clang::CFG* cfg = nullptr) {
     Transfer transfer(state, target, unsafe, const_cast<clang::ASTContext&>(context));
     for (const clang::CFGElement& element : block) {
         if (const auto statement = element.getAs<clang::CFGStmt>()) {
