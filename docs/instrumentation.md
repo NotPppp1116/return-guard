@@ -141,16 +141,22 @@ cmake --build build-hardened
 When configured manually, the final targets must also link the installed
 `ReturnGuard::runtime` target or `libreturnguard_runtime.a`.
 
-The launcher:
+For normal compile commands with an explicit `-o`, the launcher:
 
-1. creates a temporary transformed source beside the original source;
-2. invokes ReturnGuard with the real compilation arguments;
-3. optionally creates a deterministic per-object site map;
-4. compiles the transformed source;
-5. rewrites dependency output to name the original source;
-6. preserves original `__FILE__`, macro, diagnostic, and debug paths;
-7. removes the temporary source even when compilation fails;
-8. removes the site map when the real compiler does not produce the object.
+1. creates a unique temporary directory beside the object output, not in the
+   source tree;
+2. writes the transformed source there;
+3. restores the original quoted-include directory with `-iquote`;
+4. optionally creates a deterministic per-object site map;
+5. compiles the transformed source;
+6. rewrites dependency output to name the original source;
+7. preserves original `__FILE__`, macro, diagnostic, and debug paths;
+8. removes the temporary directory even when compilation fails;
+9. removes the site map when the real compiler does not produce the object.
+
+This allows hardened builds from read-only, vendored, or otherwise immutable
+source trees. Commands without an explicit output retain the older adjacent
+source fallback because no writable build-output directory can be identified.
 
 The launcher recognizes these optional environment variables:
 
@@ -229,9 +235,15 @@ for signal handlers. The fatal path does not acquire the registry update lock.
 
 ## Built-in contracts
 
-The prototype recognizes straightforward null-returning allocation and stream
-APIs, and straightforward negative-returning POSIX and stdio APIs. Project
-functions can declare a contract explicitly:
+Built-in contracts are limited to declarations from system headers in the
+legitimate global scope, plus `std` and its inline namespaces for standard C
+library APIs. A same-named function in another namespace does not inherit libc
+or POSIX failure semantics. Explicit ReturnGuard annotations still work in any
+namespace.
+
+The automatic null contracts currently cover stream and directory APIs whose
+null result is unambiguously failure, such as `fopen`, `freopen`, `tmpfile`,
+`fdopen`, and `opendir`. Project functions can declare contracts explicitly:
 
 ```c
 #include <returnguard/Contracts.h>
@@ -244,12 +256,15 @@ A null contract requires a pointer return type. A negative contract requires a
 signed integer return type. Invalid declarations stop transformation with an
 error instead of silently bypassing the contract.
 
+`malloc`, `calloc`, `aligned_alloc`, and `realloc` are not automatically wrapped.
+A zero-size request may legally return null, so they require a future size-aware
+rewrite that preserves single evaluation of every argument. A project may
+instead annotate a wrapper whose own contract makes null unambiguously fatal,
+for example because it rejects zero sizes before calling the allocator.
+
 `free` and `memcpy` are intentionally not return-result contracts. `free`
 belongs to ownership/lifetime analysis, while invalid `memcpy` arguments cause
 undefined behavior rather than a reported failure.
-
-`realloc` is also not automatically wrapped yet because a zero-size call may
-legally return null without representing a normal allocation failure.
 
 Context-sensitive I/O functions such as `read`, `write`, `recv`, `send`, and
 `accept` are not automatically fatal. They need policies for `EINTR`, `EAGAIN`,
@@ -267,7 +282,7 @@ policy.
 - Indirect function-pointer calls require future contract propagation.
 - GCC-specific compilation options unsupported by Clang may require filtering or
   a Clang-based hardened build.
-- C and C++ compilers must support the path-remapping options used by the
-  launcher; current testing targets modern GCC and Clang on Linux.
+- C and C++ compilers must support the quoted-include and path-remapping options
+  used by the launcher; current testing targets modern GCC and Clang on Linux.
 - After changing a target's source list, clean its build outputs before treating
   a manually merged site map as authoritative.
