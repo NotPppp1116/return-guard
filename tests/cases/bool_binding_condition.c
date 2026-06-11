@@ -8,7 +8,7 @@ RG_NULLABLE struct item* nullable_item(void);
 
 int bool_binding_check(void) {
     struct item* p = nullable_item();
-    int missing = (p == NULL);
+    const _Bool missing = (p == NULL);
     if (!missing) {
         return p->value;
     }
