@@ -9,3 +9,13 @@ add_returnguard_test(
     --expect "global_backed_result_missing"
     --expect "callback_result_missing"
     --expect "STATUS_UNKNOWN")
+
+add_returnguard_test(
+    returnguard.cross_function_globals_errors cross_function_globals.c practical 3
+    "missing STATUS_FATAL"
+    --expect "cross_function_chain_missing"
+    --expect "global_backed_result_missing"
+    --expect "callback_result_missing"
+    --fail-on-diagnostics
+    --diagnostic-kind error
+    --expected-exit-code 1)
