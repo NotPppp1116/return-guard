@@ -111,6 +111,8 @@ bool write_site_map(clang::CompilerInstance& compiler,
         write_json_string(output, site.function);
         output << ", \"callee\": ";
         write_json_string(output, site.callee);
+        output << ", \"callee_type\": ";
+        write_json_string(output, site.callee_type);
         output << ", \"predicate\": ";
         write_json_string(output, site.predicate);
         output << '}';
