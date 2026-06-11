@@ -160,13 +160,43 @@ const clang::ValueDecl* lvalue_declaration(const clang::Expr* expression) {
     return nullptr;
 }
 
+bool function_name_matches(const clang::FunctionDecl& function, llvm::StringRef name) {
+    name = name.trim();
+    if (name.empty()) {
+        return false;
+    }
+    if (function.getQualifiedNameAsString() == name.str()) {
+        return true;
+    }
+    return function.getIdentifier() != nullptr && function.getName() == name;
+}
+
+bool configured_lifetime_role(const clang::FunctionDecl& function, llvm::StringRef role) {
+    for (const std::string& entry : returnguard::options().lifetime_roles) {
+        const auto [name, configured_role] = llvm::StringRef(entry).split('=');
+        if (configured_role.trim() == role && function_name_matches(function, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool is_allocation_call(const clang::CallExpr* call) {
     const clang::FunctionDecl* callee = call == nullptr ? nullptr : call->getDirectCallee();
     if (callee == nullptr) {
         return false;
     }
+    if (configured_lifetime_role(*callee, "alloc")) {
+        return true;
+    }
     return has_identifier_name(callee, "malloc") || has_identifier_name(callee, "calloc") ||
-           has_identifier_name(callee, "aligned_alloc");
+           has_identifier_name(callee, "aligned_alloc") ||
+           has_identifier_name(callee, "kmalloc") || has_identifier_name(callee, "kzalloc") ||
+           has_identifier_name(callee, "kcalloc") ||
+           has_identifier_name(callee, "kmalloc_array") ||
+           has_identifier_name(callee, "krealloc_array") ||
+           has_identifier_name(callee, "vmalloc") || has_identifier_name(callee, "vzalloc") ||
+           has_identifier_name(callee, "kvmalloc") || has_identifier_name(callee, "kvzalloc");
 }
 
 bool returns_pointer(const clang::Expr* expression) {
@@ -183,12 +213,23 @@ bool is_deallocation_call(const clang::CallExpr* call) {
     if (callee == nullptr) {
         return false;
     }
-    return has_identifier_name(callee, "free") || has_identifier_name(callee, "realloc");
+    if (configured_lifetime_role(*callee, "free") || configured_lifetime_role(*callee, "realloc")) {
+        return true;
+    }
+    return has_identifier_name(callee, "free") || has_identifier_name(callee, "realloc") ||
+           has_identifier_name(callee, "kfree") ||
+           has_identifier_name(callee, "kfree_sensitive") ||
+           has_identifier_name(callee, "kvfree") ||
+           has_identifier_name(callee, "kvfree_sensitive") ||
+           has_identifier_name(callee, "vfree");
 }
 
 bool is_realloc_call(const clang::CallExpr* call) {
     const clang::FunctionDecl* callee = call == nullptr ? nullptr : call->getDirectCallee();
-    return has_identifier_name(callee, "realloc");
+    if (callee == nullptr) {
+        return false;
+    }
+    return configured_lifetime_role(*callee, "realloc") || has_identifier_name(callee, "realloc");
 }
 
 class LifetimeTransfer final {

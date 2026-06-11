@@ -14,6 +14,9 @@
 #include <optional>
 #include <string>
 
+// Built-in policy stays focused on stable stdio/POSIX/Wayland-style system APIs, not
+// project-specific names.
+
 namespace returnguard::internal {
 namespace {
 

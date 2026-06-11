@@ -6,6 +6,7 @@
 
 #include <returnguard/Options.hpp>
 
+#include <clang/AST/Attr.h>
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
@@ -62,9 +63,27 @@ bool is_commonly_ignored_system_function(const clang::FunctionDecl* function) {
     }
     const llvm::StringRef name = function->getName();
     static const std::unordered_set<std::string> ignored_names = {
-        "printf",    "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf", "vsprintf",
-        "vsnprintf", "memcpy",  "memmove", "memset",   "strcpy",  "strncpy",  "strcat",
-        "strncat",   "putchar", "putc",    "puts",     "fwrite"};
+        "__builtin_expect",
+        "__builtin_expect_with_probability",
+        "printf",
+        "fprintf",
+        "sprintf",
+        "snprintf",
+        "vprintf",
+        "vfprintf",
+        "vsprintf",
+        "vsnprintf",
+        "memcpy",
+        "memmove",
+        "memset",
+        "strcpy",
+        "strncpy",
+        "strcat",
+        "strncat",
+        "putchar",
+        "putc",
+        "puts",
+        "fwrite"};
     if (ignored_names.contains(name.str())) {
         return true;
     }
@@ -93,8 +112,13 @@ bool is_commonly_ignored_system_function(const clang::FunctionDecl* function) {
     static const std::unordered_set<std::string> ignored_std_names = {
         "abs",
         "any_cast",
+        "back_inserter",
         "begin",
         "ceil",
+        "canonical",
+        "count",
+        "create_directory",
+        "distance",
         "duration_cast",
         "empty",
         "size",
@@ -115,16 +139,33 @@ bool is_commonly_ignored_system_function(const clang::FunctionDecl* function) {
         "emplace",
         "end",
         "exists",
+        "first",
+        "for_each",
         "str",
         "format",
         "has_value",
+        "insert",
+        "insert_range",
         "make_pair",
+        "make_move_iterator",
         "make_tuple",
+        "max",
         "next",
+        "permissions",
         "pow",
+        "prev",
         "ref",
+        "remove",
+        "remove_all",
+        "rbegin",
+        "rend",
         "round",
+        "rotate",
+        "status",
         "string",
+        "time_point_cast",
+        "to",
+        "to_array",
         "to_string",
         "stoi",
         "stol",
@@ -140,6 +181,11 @@ bool is_commonly_ignored_system_function(const clang::FunctionDecl* function) {
         "what",
     };
     return ignored_std_names.contains(name.str());
+}
+
+bool is_boolean_domain(const Domain& domain) {
+    return domain.finite && domain.values.size() == 2U &&
+           (domain.type_name == "bool" || domain.type_name == "_Bool");
 }
 
 } // namespace
@@ -294,7 +340,22 @@ CheckResult Analyzer::classify_call(const clang::CallExpr* call, const Domain& d
     };
 }
 
-bool Analyzer::should_report(const CheckResult& result, const Domain& domain) const {
+bool Analyzer::call_requires_verification(const clang::CallExpr* call) const {
+    const clang::FunctionDecl* callee = call == nullptr ? nullptr : call->getDirectCallee();
+    if (callee == nullptr) {
+        return false;
+    }
+
+    for (const clang::FunctionDecl* redeclaration : callee->redecls()) {
+        if (redeclaration->hasAttr<clang::WarnUnusedResultAttr>()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Analyzer::should_report(const CheckResult& result, const Domain& domain,
+                             const clang::CallExpr* call) const {
     switch (returnguard::options().mode) {
     case Mode::IgnoredOnly:
         return result.kind == HandlingKind::Ignored;
@@ -302,6 +363,12 @@ bool Analyzer::should_report(const CheckResult& result, const Domain& domain) co
     case Mode::Practical:
         if (result.kind == HandlingKind::Ignored) {
             return true;
+        }
+        if (call_requires_verification(call) && result.kind == HandlingKind::Consumed) {
+            return true;
+        }
+        if (is_boolean_domain(domain) && result.kind == HandlingKind::PartiallyChecked) {
+            return false;
         }
         return domain.finite && result.kind == HandlingKind::PartiallyChecked;
 
@@ -319,7 +386,8 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
     }
 
     if (const clang::FunctionDecl* callee = call->getDirectCallee()) {
-        if (source_manager_.isInSystemHeader(callee->getLocation()) &&
+        if ((source_manager_.isInSystemHeader(callee->getLocation()) ||
+             callee->getBuiltinID() != 0U) &&
             is_commonly_ignored_system_function(callee)) {
             return;
         }
@@ -340,7 +408,7 @@ void Analyzer::analyze_call(clang::CallExpr* call) {
 
     const Domain domain = call_domain(call);
     const CheckResult result = classify_call(call, domain);
-    if (!should_report(result, domain)) {
+    if (!should_report(result, domain, call)) {
         return;
     }
 

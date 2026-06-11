@@ -69,6 +69,10 @@ add_returnguard_test(returnguard.compound_assignment compound_assignment.c stric
 add_returnguard_test(returnguard.annotation_redeclaration annotation_redeclaration.c practical 1 "missing 4, 32")
 add_returnguard_test(returnguard.switches switches.c strict 1 "open-ended")
 add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value of 'annotated_status'")
+add_returnguard_test(returnguard.must_check must_check.c practical 2 "must_check_status")
+add_returnguard_test(returnguard.nodiscard nodiscard.cpp practical 1 "nodiscard_status")
+add_returnguard_clean_test(returnguard.bool_predicate bool_predicate.c practical)
+add_returnguard_test(returnguard.bool_predicate_strict bool_predicate.c strict 1 "ready")
 add_returnguard_test(returnguard.cpp_calls cpp_calls.cpp practical 1 "missing 4, 32")
 add_returnguard_clean_test(returnguard.std_value_helpers std_value_helpers.cpp strict)
 add_returnguard_test(returnguard.pointer_flow pointer_flow.c practical 1 "missing 4, 32")
@@ -81,6 +85,11 @@ add_returnguard_test(
     --tool-arg=--analyze-headers)
 add_returnguard_test(returnguard.safety_lifetime safety_lifetime.c practical 9 "returnguard safety")
 add_returnguard_test(returnguard.safety_lifetime_cpp safety_lifetime.cpp practical 4 "returnguard safety")
+add_returnguard_test(returnguard.kernel_lifetime kernel_lifetime.c practical 2 "returnguard safety")
+add_returnguard_test(
+    returnguard.function_config_lifetime function_config_lifetime.c practical 2
+    "returnguard safety"
+    --tool-arg=--function-config=${CMAKE_CURRENT_SOURCE_DIR}/cases/function_config.rg)
 add_returnguard_test(
     returnguard.complex_array_index_and_oob complex_array_index_and_oob.c practical 1
     "nullable_bytes")

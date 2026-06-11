@@ -23,6 +23,7 @@ struct Options {
     std::string site_map_output;
     std::string site_root;
     std::vector<std::string> contracts;
+    std::vector<std::string> lifetime_roles;
 };
 
 void set_options(Options options);

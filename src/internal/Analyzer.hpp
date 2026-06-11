@@ -142,7 +142,9 @@ class Analyzer final : public clang::RecursiveASTVisitor<Analyzer> {
                                                 const clang::VarDecl* variable,
                                                 const Domain& domain);
     [[nodiscard]] CheckResult classify_call(const clang::CallExpr* call, const Domain& domain);
-    [[nodiscard]] bool should_report(const CheckResult& result, const Domain& domain) const;
+    [[nodiscard]] bool call_requires_verification(const clang::CallExpr* call) const;
+    [[nodiscard]] bool should_report(const CheckResult& result, const Domain& domain,
+                                      const clang::CallExpr* call) const;
     void analyze_call(clang::CallExpr* call);
 
     clang::ASTContext& context_;

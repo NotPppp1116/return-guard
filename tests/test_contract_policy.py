@@ -118,6 +118,31 @@ def main() -> int:
         if "__RG_CHECK_NEGATIVE(vendor::open" not in file_text:
             return fail("contract file did not rewrite vendor::open", file_text)
 
+        function_config = directory / "function-config.rg"
+        function_config.write_text(
+            "# combined function policy\ncontract vendor::open negative\n",
+            encoding="utf-8",
+        )
+        config_transformed = directory / "instrumented-config.cpp"
+        from_config = run(
+            [
+                str(tool),
+                "--no-color",
+                f"--function-config={function_config}",
+                f"--instrument-output={config_transformed}",
+                str(source),
+                "--",
+                "-std=c++20",
+                "-I",
+                str(include),
+            ]
+        )
+        if from_config.returncode != 0:
+            return fail("function-config transformation failed", from_config.stdout)
+        config_text = config_transformed.read_text(encoding="utf-8")
+        if "__RG_CHECK_NEGATIVE(vendor::open" not in config_text:
+            return fail("function config did not rewrite vendor::open", config_text)
+
     return 0
 
 

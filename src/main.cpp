@@ -98,6 +98,18 @@ llvm::cl::list<std::string> contract_file_options(
     llvm::cl::ZeroOrMore,
     llvm::cl::cat(category));
 
+llvm::cl::list<std::string> function_config_options(
+    "function-config",
+    llvm::cl::desc(
+        "Read function policy lines: 'contract name null|negative' or 'lifetime name alloc|free|realloc'"),
+    llvm::cl::ZeroOrMore,
+    llvm::cl::cat(category));
+
+struct FunctionConfig {
+    std::vector<std::string> contracts;
+    std::vector<std::string> lifetime_roles;
+};
+
 returnguard::Mode parse_mode(llvm::StringRef value) {
     if (value == "practical") {
         return returnguard::Mode::Practical;
@@ -118,6 +130,61 @@ bool valid_contract_spec(llvm::StringRef value) {
     const auto [name, predicate] = value.split('=');
     return !name.trim().empty() &&
            (predicate.trim() == "null" || predicate.trim() == "negative");
+}
+
+bool valid_lifetime_spec(llvm::StringRef value) {
+    const auto [name, role] = value.split('=');
+    return !name.trim().empty() &&
+           (role.trim() == "alloc" || role.trim() == "free" || role.trim() == "realloc");
+}
+
+void parse_function_config_line(llvm::StringRef text, const std::string& path,
+                                unsigned line_number, FunctionConfig& config) {
+    text = text.split('#').first.trim();
+    if (text.empty()) {
+        return;
+    }
+
+    const auto [kind, rest] = text.split(' ');
+    const auto [name, value] = rest.trim().split(' ');
+    if (kind == "contract") {
+        const std::string spec = (name.trim() + "=" + value.trim()).str();
+        if (valid_contract_spec(spec)) {
+            config.contracts.push_back(spec);
+            return;
+        }
+    }
+    if (kind == "lifetime") {
+        const std::string spec = (name.trim() + "=" + value.trim()).str();
+        if (valid_lifetime_spec(spec)) {
+            config.lifetime_roles.push_back(spec);
+            return;
+        }
+    }
+
+    llvm::errs() << "returnguard: invalid function policy in " << path << ':' << line_number
+                 << " (expected 'contract name null|negative' or "
+                    "'lifetime name alloc|free|realloc')\n";
+    std::exit(2);
+}
+
+FunctionConfig collect_function_config() {
+    FunctionConfig config;
+    for (const std::string& path : function_config_options) {
+        std::ifstream input(path);
+        if (!input) {
+            llvm::errs() << "returnguard: could not read --function-config='" << path << "'\n";
+            std::exit(2);
+        }
+
+        std::string line;
+        unsigned line_number = 0;
+        while (std::getline(input, line)) {
+            ++line_number;
+            parse_function_config_line(line, path, line_number, config);
+        }
+    }
+    return config;
 }
 
 std::vector<std::string> collect_contracts() {
@@ -205,6 +272,11 @@ int main(int argc, const char** argv) {
         return 2;
     }
 
+    FunctionConfig function_config = collect_function_config();
+    std::vector<std::string> contracts = collect_contracts();
+    contracts.insert(contracts.end(), function_config.contracts.begin(),
+                     function_config.contracts.end());
+
     returnguard::set_options({
         .mode = parse_mode(mode_option),
         .analyze_headers = analyze_headers,
@@ -216,7 +288,8 @@ int main(int argc, const char** argv) {
         .instrument_output = instrument_output,
         .site_map_output = site_map_output,
         .site_root = site_root,
-        .contracts = collect_contracts(),
+        .contracts = std::move(contracts),
+        .lifetime_roles = std::move(function_config.lifetime_roles),
     });
 
     clang::tooling::ClangTool tool(

@@ -11,6 +11,8 @@ and `.cxx`) translation units.
 ## What it currently understands
 
 - Calls returning any non-`void` type.
+- Native must-check signals such as `__attribute__((warn_unused_result))`,
+  `[[nodiscard]]`, and project macros built from those attributes.
 - `_Bool` and enum return domains.
 - Finite integer domains supplied through `annotate` attributes on any function
   redeclaration.
@@ -239,6 +241,23 @@ Then pass it with:
 
 ```sh
 returnguard --contract-file=contracts.rg \
+    --instrument-output=instrumented.c file.c -- -std=c17
+```
+
+For a single project policy file that also teaches the safety analysis about
+custom lifetime functions, use `--function-config`:
+
+```text
+# returnguard.rg
+contract project_open negative
+contract Project::make_handle null
+lifetime project_alloc alloc
+lifetime project_realloc realloc
+lifetime project_free free
+```
+
+```sh
+returnguard --function-config=returnguard.rg \
     --instrument-output=instrumented.c file.c -- -std=c17
 ```
 
