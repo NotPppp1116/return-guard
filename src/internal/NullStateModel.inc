@@ -417,7 +417,7 @@ BranchConstraint condition_constraint(
     // variable may be reassigned, address-taken, or passed to mutating callees.
     if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
         if (const auto* var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl())) {
-            if (var->getInit() != nullptr && var->getType()->isConstQualified()) {
+            if (var->getInit() != nullptr && var->getType().isConstQualified()) {
                 // Conservative mutation/escape finder: detect assignments, inc/dec,
                 // address-of uses, or passing the variable to indirect/possibly-mutating
                 // callees. If any are found, do not substitute the initializer.
