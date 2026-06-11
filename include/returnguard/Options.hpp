@@ -19,6 +19,8 @@ struct Options {
     bool fail_on_diagnostics = false;
     bool color = true;
     std::string instrument_output;
+    std::string site_map_output;
+    std::string site_root;
 };
 
 void set_options(Options options);
