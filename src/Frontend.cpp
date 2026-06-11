@@ -53,8 +53,7 @@ void write_json_string(llvm::raw_ostream& output, llvm::StringRef value) {
             break;
         default:
             if (character < 0x20U) {
-                output << "\\u00" << hex[character >> 4U]
-                       << hex[character & 0x0fU];
+                output << "\\u00" << hex[character >> 4U] << hex[character & 0x0fU];
             } else {
                 output << static_cast<char>(character);
             }
@@ -64,12 +63,10 @@ void write_json_string(llvm::raw_ostream& output, llvm::StringRef value) {
     output << '"';
 }
 
-void report_write_error(clang::CompilerInstance& compiler,
-                        llvm::StringRef kind,
+void report_write_error(clang::CompilerInstance& compiler, llvm::StringRef kind,
                         llvm::StringRef message) {
     const unsigned diagnostic = compiler.getDiagnostics().getCustomDiagID(
-        clang::DiagnosticsEngine::Error,
-        "returnguard: cannot write %0: %1");
+        clang::DiagnosticsEngine::Error, "returnguard: cannot write %0: %1");
     compiler.getDiagnostics().Report(diagnostic) << kind << message;
 }
 
@@ -80,10 +77,7 @@ bool write_site_map(clang::CompilerInstance& compiler,
     }
 
     std::error_code error;
-    llvm::raw_fd_ostream output(
-        options().site_map_output,
-        error,
-        llvm::sys::fs::OF_Text);
+    llvm::raw_fd_ostream output(options().site_map_output, error, llvm::sys::fs::OF_Text);
     if (error) {
         report_write_error(compiler, "site map", error.message());
         return false;
@@ -91,8 +85,7 @@ bool write_site_map(clang::CompilerInstance& compiler,
 
     std::vector<internal::SiteMetadata> sorted(sites.begin(), sites.end());
     std::sort(sorted.begin(), sorted.end(),
-              [](const internal::SiteMetadata& left,
-                 const internal::SiteMetadata& right) {
+              [](const internal::SiteMetadata& left, const internal::SiteMetadata& right) {
                   return left.id < right.id;
               });
 
@@ -100,13 +93,11 @@ bool write_site_map(clang::CompilerInstance& compiler,
 
     for (std::size_t index = 0U; index < sorted.size(); ++index) {
         const internal::SiteMetadata& site = sorted[index];
-        output << (index == 0U ? "\n" : ",\n")
-               << "    {\"id\": ";
+        output << (index == 0U ? "\n" : ",\n") << "    {\"id\": ";
         write_json_string(output, std::to_string(site.id));
         output << ", \"file\": ";
         write_json_string(output, site.file);
-        output << ", \"line\": " << site.line
-               << ", \"column\": " << site.column
+        output << ", \"line\": " << site.line << ", \"column\": " << site.column
                << ", \"function\": ";
         write_json_string(output, site.function);
         output << ", \"callee\": ";
@@ -133,8 +124,7 @@ bool write_site_map(clang::CompilerInstance& compiler,
 
 class Consumer final : public clang::ASTConsumer {
   public:
-    Consumer(clang::ASTContext& context,
-             clang::Rewriter* rewriter,
+    Consumer(clang::ASTContext& context, clang::Rewriter* rewriter,
              std::vector<internal::SiteMetadata>* sites)
         : analyzer_(context, rewriter, sites) {}
 
@@ -148,9 +138,8 @@ class Consumer final : public clang::ASTConsumer {
 
 class Action final : public clang::ASTFrontendAction {
   public:
-    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(
-        clang::CompilerInstance& compiler,
-        llvm::StringRef) override {
+    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compiler,
+                                                          llvm::StringRef) override {
         compiler.getDiagnosticOpts().ShowColors = options().color;
 
         clang::Rewriter* active_rewriter = nullptr;
@@ -160,8 +149,7 @@ class Action final : public clang::ASTFrontendAction {
             active_rewriter = &rewriter_;
             active_sites = &sites_;
         }
-        return std::make_unique<Consumer>(
-            compiler.getASTContext(), active_rewriter, active_sites);
+        return std::make_unique<Consumer>(compiler.getASTContext(), active_rewriter, active_sites);
     }
 
     void EndSourceFileAction() override {
@@ -182,17 +170,13 @@ class Action final : public clang::ASTFrontendAction {
         const clang::FileID main_file = source_manager.getMainFileID();
 
         std::error_code error;
-        llvm::raw_fd_ostream output(
-            options().instrument_output,
-            error,
-            llvm::sys::fs::OF_Text);
+        llvm::raw_fd_ostream output(options().instrument_output, error, llvm::sys::fs::OF_Text);
         if (error) {
             report_write_error(compiler, "instrumented output", error.message());
             return;
         }
 
-        if (const clang::RewriteBuffer* buffer =
-                rewriter_.getRewriteBufferFor(main_file)) {
+        if (const llvm::RewriteBuffer* buffer = rewriter_.getRewriteBufferFor(main_file)) {
             output << std::string(buffer->begin(), buffer->end());
         } else {
             output << source_manager.getBufferData(main_file);
@@ -216,12 +200,8 @@ class Action final : public clang::ASTFrontendAction {
 
 } // namespace
 
-std::unique_ptr<clang::FrontendAction> make_frontend_action() {
-    return std::make_unique<Action>();
-}
+std::unique_ptr<clang::FrontendAction> make_frontend_action() { return std::make_unique<Action>(); }
 
-std::unique_ptr<clang::FrontendAction> ActionFactory::create() {
-    return make_frontend_action();
-}
+std::unique_ptr<clang::FrontendAction> ActionFactory::create() { return make_frontend_action(); }
 
 } // namespace returnguard
