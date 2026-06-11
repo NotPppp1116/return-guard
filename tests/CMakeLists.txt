@@ -191,3 +191,14 @@ add_test(
         --include "${CMAKE_SOURCE_DIR}/include"
         --runtime "$<TARGET_FILE:returnguard_runtime>"
 )
+
+add_test(
+    NAME returnguard.allocator_policy
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_allocator_policy.py"
+        --tool "$<TARGET_FILE:returnguard>"
+        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_allocator_policy.c"
+        --include "${CMAKE_SOURCE_DIR}/include"
+        --compiler "${CMAKE_C_COMPILER}"
+)
