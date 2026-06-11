@@ -4,7 +4,8 @@ project(returnguard VERSION 0.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_EXTENSIONS ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(RETURNGUARD_WARNINGS_AS_ERRORS "Treat ReturnGuard warnings as errors" OFF)
 option(RETURNGUARD_BUILD_TESTS "Build and register ReturnGuard tests" ON)
@@ -42,6 +43,17 @@ if(RETURNGUARD_CLANG_EXECUTABLE)
             "${RETURNGUARD_RESOURCE_OUTPUT}"
             RETURNGUARD_RESOURCE_DIR)
     endif()
+endif()
+
+if(NOT RETURNGUARD_RESOURCE_DIR)
+    foreach(LLVM_LIBRARY_DIR IN LISTS LLVM_LIBRARY_DIRS)
+        if(IS_DIRECTORY "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}/include")
+            file(TO_CMAKE_PATH
+                "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}"
+                RETURNGUARD_RESOURCE_DIR)
+            break()
+        endif()
+    endforeach()
 endif()
 
 if(RETURNGUARD_RESOURCE_DIR)
@@ -204,6 +216,11 @@ install(
     RENAME returnguard-project
 )
 install(
+    PROGRAMS scripts/returnguard_compiler_launcher.py
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RENAME returnguard-compiler-launcher
+)
+install(
     FILES scripts/returnguard_project_runtime.py
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
@@ -223,6 +240,17 @@ if(RETURNGUARD_BUILD_TESTS)
             --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
             --compiler "${CMAKE_C_COMPILER}"
             --cxx-compiler "${CMAKE_CXX_COMPILER}"
+            --runtime "$<TARGET_FILE:returnguard_runtime>"
+    )
+    add_test(
+        NAME returnguard.compiler_launcher
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compiler_launcher.py"
+            --launcher "${CMAKE_CURRENT_SOURCE_DIR}/scripts/returnguard_compiler_launcher.py"
+            --tool "$<TARGET_FILE:returnguard>"
+            --compiler "${CMAKE_C_COMPILER}"
+            --include "${CMAKE_CURRENT_SOURCE_DIR}/include"
             --runtime "$<TARGET_FILE:returnguard_runtime>"
     )
 endif()
