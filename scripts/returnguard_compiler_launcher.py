@@ -213,6 +213,15 @@ def compiler_output_file(arguments: Sequence[str]) -> pathlib.Path | None:
     return None
 
 
+def absolute_compiler_output(arguments: Sequence[str]) -> pathlib.Path | None:
+    output = compiler_output_file(arguments)
+    if output is None:
+        return None
+    if not output.is_absolute():
+        output = pathlib.Path.cwd() / output
+    return output.resolve(strict=False)
+
+
 def site_map_output(
     arguments: Sequence[str], original_source: pathlib.Path
 ) -> pathlib.Path | None:
@@ -220,23 +229,46 @@ def site_map_output(
     if not configured:
         return None
 
-    object_file = compiler_output_file(arguments)
+    object_file = absolute_compiler_output(arguments)
     if object_file is None:
         raise LauncherError(
             "RETURNGUARD_SITE_MAP_DIR requires a compile command with an explicit -o output"
         )
-    if not object_file.is_absolute():
-        object_file = pathlib.Path.cwd() / object_file
-    object_file = object_file.resolve(strict=False)
 
     directory = pathlib.Path(configured).expanduser().resolve(strict=False)
     directory.mkdir(parents=True, exist_ok=True)
-    identity = f"{object_file}\0{original_source}".encode("utf-8", errors="surrogateescape")
+    identity = f"{object_file}\0{original_source}".encode(
+        "utf-8", errors="surrogateescape"
+    )
     digest = hashlib.sha256(identity).hexdigest()[:16]
     return directory / f"{object_file.name}.{digest}.json"
 
 
-def insert_compiler_options(
+def create_temporary_source(
+    arguments: Sequence[str], original_source: pathlib.Path
+) -> tuple[pathlib.Path, pathlib.Path | None]:
+    output = absolute_compiler_output(arguments)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        temporary_directory = pathlib.Path(
+            tempfile.mkdtemp(prefix=".returnguard-", dir=output.parent)
+        )
+        return temporary_directory / original_source.name, temporary_directory
+
+    temporary_handle = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix=f".{original_source.stem}.returnguard-",
+        suffix=original_source.suffix,
+        dir=original_source.parent,
+        delete=False,
+    )
+    temporary_source = pathlib.Path(temporary_handle.name)
+    temporary_handle.close()
+    return temporary_source, None
+
+
+def prepend_compiler_options(
     arguments: Sequence[str], additional: Sequence[str]
 ) -> list[str]:
     result = list(arguments)
@@ -244,7 +276,10 @@ def insert_compiler_options(
         separator = result.index("--")
     except ValueError:
         separator = len(result)
-    result[separator:separator] = additional
+    result[0:0] = additional
+    if separator == 0:
+        result.remove("--")
+        result[len(additional):len(additional)] = ["--"]
     return result
 
 
@@ -293,6 +328,10 @@ def main() -> int:
     if os.environ.get("RETURNGUARD_DISABLE") == "1":
         return run_passthrough(compiler, arguments)
 
+    temporary_source: pathlib.Path | None = None
+    temporary_directory: pathlib.Path | None = None
+    metadata_output: pathlib.Path | None = None
+
     try:
         source = source_argument(arguments)
         if source is None:
@@ -305,81 +344,82 @@ def main() -> int:
         if metadata_output is not None:
             metadata_output.unlink(missing_ok=True)
 
-        temporary_handle = tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            prefix=f".{original_source.stem}.returnguard-",
-            suffix=original_source.suffix,
-            dir=original_source.parent,
-            delete=False,
+        temporary_source, temporary_directory = create_temporary_source(
+            arguments, original_source
         )
-        temporary_source = pathlib.Path(temporary_handle.name)
-        temporary_handle.close()
 
-        try:
-            analysis_arguments = tool_arguments(arguments, source_index)
-            transform_command = [
-                str(returnguard),
-                "--no-color",
-                f"--instrument-output={temporary_source}",
+        analysis_arguments = tool_arguments(arguments, source_index)
+        transform_command = [
+            str(returnguard),
+            "--no-color",
+            f"--instrument-output={temporary_source}",
+        ]
+        if metadata_output is not None:
+            transform_command.append(f"--site-map-output={metadata_output}")
+            source_root = os.environ.get("RETURNGUARD_SOURCE_ROOT")
+            if source_root:
+                transform_command.append(
+                    f"--site-root={pathlib.Path(source_root).expanduser().resolve(strict=False)}"
+                )
+        transform_command.extend(
+            [
+                str(original_source),
+                "--",
+                *analysis_arguments,
             ]
+        )
+
+        transform = subprocess.run(transform_command, check=False)
+        if transform.returncode != 0:
             if metadata_output is not None:
-                transform_command.append(f"--site-map-output={metadata_output}")
-                source_root = os.environ.get("RETURNGUARD_SOURCE_ROOT")
-                if source_root:
-                    transform_command.append(
-                        f"--site-root={pathlib.Path(source_root).expanduser().resolve(strict=False)}"
-                    )
-            transform_command.extend(
-                [
-                    str(original_source),
-                    "--",
-                    *analysis_arguments,
-                ]
-            )
-
-            transform = subprocess.run(transform_command, check=False)
-            if transform.returncode != 0:
-                if metadata_output is not None:
-                    metadata_output.unlink(missing_ok=True)
-                return transform.returncode
-            if not temporary_source.is_file() or temporary_source.stat().st_size == 0:
-                raise LauncherError("ReturnGuard produced no transformed source")
-            if metadata_output is not None and not metadata_output.is_file():
-                raise LauncherError("ReturnGuard produced no site metadata output")
-
-            add_original_line_mapping(temporary_source, original_source)
-
-            compiler_arguments = list(arguments)
-            compiler_arguments[source_index] = str(temporary_source)
-            path_options = [
-                "-I",
-                str(include),
-                f"-ffile-prefix-map={temporary_source}={original_source}",
-                f"-fdebug-prefix-map={temporary_source}={original_source}",
-                f"-fmacro-prefix-map={temporary_source}={original_source}",
-            ]
-            compiler_arguments = insert_compiler_options(
-                compiler_arguments, path_options
-            )
-            result = subprocess.run(
-                [compiler, *compiler_arguments],
-                check=False,
-            )
-            rewrite_dependency_file(
-                dependency_file(arguments), temporary_source, original_source
-            )
-            if result.returncode != 0 and metadata_output is not None:
                 metadata_output.unlink(missing_ok=True)
-            return result.returncode
-        finally:
-            temporary_source.unlink(missing_ok=True)
+            return transform.returncode
+        if not temporary_source.is_file() or temporary_source.stat().st_size == 0:
+            raise LauncherError("ReturnGuard produced no transformed source")
+        if metadata_output is not None and not metadata_output.is_file():
+            raise LauncherError("ReturnGuard produced no site metadata output")
+
+        add_original_line_mapping(temporary_source, original_source)
+
+        compiler_arguments = list(arguments)
+        compiler_arguments[source_index] = str(temporary_source)
+        path_options = [
+            "-iquote",
+            str(original_source.parent),
+            "-I",
+            str(include),
+            f"-ffile-prefix-map={temporary_source}={original_source}",
+            f"-fdebug-prefix-map={temporary_source}={original_source}",
+            f"-fmacro-prefix-map={temporary_source}={original_source}",
+        ]
+        compiler_arguments = prepend_compiler_options(
+            compiler_arguments, path_options
+        )
+        result = subprocess.run(
+            [compiler, *compiler_arguments],
+            check=False,
+        )
+        rewrite_dependency_file(
+            dependency_file(arguments), temporary_source, original_source
+        )
+        if result.returncode != 0 and metadata_output is not None:
+            metadata_output.unlink(missing_ok=True)
+        return result.returncode
     except LauncherError as error:
+        if metadata_output is not None:
+            metadata_output.unlink(missing_ok=True)
         print(f"returnguard-compiler-launcher: {error}", file=sys.stderr)
         return 2
     except OSError as error:
+        if metadata_output is not None:
+            metadata_output.unlink(missing_ok=True)
         print(f"returnguard-compiler-launcher: {error}", file=sys.stderr)
         return 2
+    finally:
+        if temporary_source is not None:
+            temporary_source.unlink(missing_ok=True)
+        if temporary_directory is not None:
+            shutil.rmtree(temporary_directory, ignore_errors=True)
 
 
 if __name__ == "__main__":
