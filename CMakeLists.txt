@@ -253,6 +253,11 @@ install(
     RENAME returnguard-compiler-launcher
 )
 install(
+    PROGRAMS scripts/returnguard_site_map.py
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RENAME returnguard-site-map
+)
+install(
     FILES scripts/returnguard_project_runtime.py
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
