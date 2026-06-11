@@ -160,14 +160,14 @@ static void wipe_registered_secrets(void) {
     }
 }
 
-RETURNGUARD_RUNTIME_WEAK void __rg_fatal_hook(uint32_t site_id, int saved_errno) {
+RETURNGUARD_RUNTIME_WEAK void __rg_fatal_hook(uint64_t site_id, int saved_errno) {
     (void)site_id;
     (void)saved_errno;
 }
 
 RETURNGUARD_RUNTIME_NORETURN RETURNGUARD_RUNTIME_COLD RETURNGUARD_RUNTIME_NOINLINE
     RETURNGUARD_RUNTIME_HIDDEN void
-    __rg_fatal(uint32_t site_id, int saved_errno) {
+    __rg_fatal(uint64_t site_id, int saved_errno) {
     unsigned expected = FATAL_STATE_IDLE;
     if (atomic_compare_exchange_strong_explicit(
             &fatal_state,
