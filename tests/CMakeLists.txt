@@ -202,3 +202,14 @@ add_test(
         --include "${CMAKE_SOURCE_DIR}/include"
         --compiler "${CMAKE_C_COMPILER}"
 )
+
+add_test(
+    NAME returnguard.overload_metadata
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_overload_metadata.py"
+        --tool "$<TARGET_FILE:returnguard>"
+        --source "${CMAKE_CURRENT_SOURCE_DIR}/cases/instrumentation_overloads.cpp"
+        --include "${CMAKE_SOURCE_DIR}/include"
+        --compiler "${CMAKE_CXX_COMPILER}"
+)
