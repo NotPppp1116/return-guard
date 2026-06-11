@@ -69,7 +69,8 @@ returnguard_harden_target(hardened)
             """#include <returnguard/Contracts.h>
 static int unavailable(void) RETURNGUARD_FAILS_NEGATIVE;
 static int unavailable(void) { return -1; }
-int main(void) { return unavailable(); }
+static int consume(int value) { return value; }
+int main(void) { return consume(unavailable()); }
 """,
             encoding="utf-8",
         )
