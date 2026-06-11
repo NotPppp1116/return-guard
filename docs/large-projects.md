@@ -35,7 +35,7 @@ returnguard-project: diagnostic summary: 88 finding(s) across 4 type(s)
      33  null dereference
      28  unchecked consumed return
      18  partial return handling
-      9  short write or send
+      9  short I/O transfer
 ```
 
 Use details mode when you want the individual findings grouped under each

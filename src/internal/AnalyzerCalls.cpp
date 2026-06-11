@@ -93,23 +93,6 @@ bool is_commonly_ignored_system_function(const clang::FunctionDecl* function) {
         return true;
     }
 
-    static const std::unordered_set<std::string> ignored_wayland_names = {
-        "wl_client_get_object",
-        "wl_display_get_event_loop",
-        "wl_display_get_fd",
-        "wl_display_get_registry",
-        "wl_display_next_serial",
-        "wl_fixed_from_double",
-        "wl_fixed_from_int",
-        "wl_fixed_to_double",
-        "wl_proxy_get_version",
-        "wl_resource_get_user_data",
-        "wl_resource_get_version",
-    };
-    if (ignored_wayland_names.contains(name.str())) {
-        return true;
-    }
-
     if (!in_std_namespace) {
         return false;
     }
@@ -471,17 +454,35 @@ ByteCountConditionInfo inspect_byte_count_condition(const clang::Expr* condition
     return visitor.info();
 }
 
+bool is_read_like_byte_count_function(const clang::FunctionDecl* function) {
+    if (function == nullptr || function->getIdentifier() == nullptr) {
+        return false;
+    }
+
+    static const std::unordered_set<std::string> names = {
+        "pread",
+        "pread64",
+        "read",
+        "recv",
+        "recvfrom",
+    };
+    return names.contains(function->getName().str());
+}
+
 CheckResult short_byte_count_result(const clang::CallExpr* call) {
     CheckResult result;
     result.kind = HandlingKind::PartiallyChecked;
     const clang::FunctionDecl* function = call == nullptr ? nullptr : call->getDirectCallee();
     const std::string name =
         function == nullptr ? "<indirect function>" : function->getQualifiedNameAsString();
-    result.message = "possible short write from '" + name +
+    const bool read_like = is_read_like_byte_count_function(function);
+    const std::string transfer_kind = read_like ? "read" : "write";
+    const std::string transfer_plural = read_like ? "reads" : "writes";
+    result.message = "possible short " + transfer_kind + " from '" + name +
                      "': positive return may be smaller than requested byte count";
     result.detail =
-        "checking only for a negative return misses partial writes; compare the return value "
-        "with the requested byte count";
+        "checking only for a negative return misses partial " + transfer_plural +
+        "; compare the return value with the requested byte count";
     return result;
 }
 

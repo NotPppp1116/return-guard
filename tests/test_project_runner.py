@@ -299,7 +299,7 @@ class ProjectRunnerTests(unittest.TestCase):
                 "    print(f'{source}:1:1: warning: returnguard: possible short write from \\'write\\': positive return may be smaller than requested byte count')\n"
                 "    print(f'{source}:2:1: warning: returnguard: return value of \\'open\\' is consumed but not verified')\n"
                 "else:\n"
-                "    print(f'{source}:1:1: warning: returnguard: possible short write from \\'send\\': positive return may be smaller than requested byte count')\n",
+                "    print(f'{source}:1:1: warning: returnguard: possible short read from \\'read\\': positive return may be smaller than requested byte count')\n",
                 encoding="utf-8",
             )
             tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
@@ -317,7 +317,7 @@ class ProjectRunnerTests(unittest.TestCase):
                 "diagnostic summary: 3 finding(s) across 2 type(s)",
                 completed.stderr,
             )
-            short_line = "      2  short write or send"
+            short_line = "      2  short I/O transfer"
             consumed_line = "      1  unchecked consumed return"
             self.assertIn(short_line, completed.stderr)
             self.assertIn(consumed_line, completed.stderr)
@@ -341,7 +341,7 @@ class ProjectRunnerTests(unittest.TestCase):
                 "    print(f'{source}:1:1: warning: returnguard: possible short write from \\'write\\': positive return may be smaller than requested byte count')\n"
                 "    print(f'{source}:2:3: warning: returnguard: return value of \\'open\\' is consumed but not verified')\n"
                 "else:\n"
-                "    print(f'{source}:4:5: warning: returnguard: possible short write from \\'send\\': positive return may be smaller than requested byte count')\n",
+                "    print(f'{source}:4:5: warning: returnguard: possible short read from \\'read\\': positive return may be smaller than requested byte count')\n",
                 encoding="utf-8",
             )
             tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
@@ -362,9 +362,9 @@ class ProjectRunnerTests(unittest.TestCase):
                 "diagnostic summary: 3 finding(s) across 2 type(s)",
                 completed.stderr,
             )
-            self.assertIn("      2  short write or send", completed.stderr)
+            self.assertIn("      2  short I/O transfer", completed.stderr)
             self.assertIn("alpha.c:1:1: possible short write", completed.stderr)
-            self.assertIn("... 1 more short write or send finding(s)", completed.stderr)
+            self.assertIn("... 1 more short I/O transfer finding(s)", completed.stderr)
             self.assertIn("      1  unchecked consumed return", completed.stderr)
             self.assertIn("alpha.c:2:3: return value of 'open'", completed.stderr)
 

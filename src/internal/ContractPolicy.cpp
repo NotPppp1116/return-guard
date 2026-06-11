@@ -157,8 +157,13 @@ builtin_byte_count_parameter_index(const clang::FunctionDecl& function,
     }
 
     if (has_any_name(function, {
+                                   "pread",
+                                   "pread64",
                                    "pwrite",
                                    "pwrite64",
+                                   "read",
+                                   "recv",
+                                   "recvfrom",
                                    "send",
                                    "sendto",
                                    "write",

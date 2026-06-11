@@ -83,8 +83,8 @@ def strip_ansi(text: str) -> str:
 
 def diagnostic_type(message: str) -> str:
     message = message.strip()
-    if message.startswith("possible short write"):
-        return "short write or send"
+    if message.startswith("possible short write") or message.startswith("possible short read"):
+        return "short I/O transfer"
     if "potentially-null return value" in message or "prior null check" in message:
         return "null dereference"
     if "out-of-bounds" in message or "array index" in message:
