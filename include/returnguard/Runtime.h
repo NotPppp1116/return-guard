@@ -66,7 +66,7 @@ returnguard_unregister_secret(void* memory) RETURNGUARD_RUNTIME_NOEXCEPT;
 
 RETURNGUARD_RUNTIME_NORETURN RETURNGUARD_RUNTIME_COLD RETURNGUARD_RUNTIME_NOINLINE
     RETURNGUARD_RUNTIME_HIDDEN void
-    __rg_fatal(uint32_t site_id, int saved_errno) RETURNGUARD_RUNTIME_NOEXCEPT;
+    __rg_fatal(uint64_t site_id, int saved_errno) RETURNGUARD_RUNTIME_NOEXCEPT;
 
 /*
  * Applications may provide a strong definition of this hook. Registered secret
@@ -74,7 +74,7 @@ RETURNGUARD_RUNTIME_NORETURN RETURNGUARD_RUNTIME_COLD RETURNGUARD_RUNTIME_NOINLI
  * does nothing. The hook may emit a minimal diagnostic, but it must not attempt
  * to recover execution.
  */
-void __rg_fatal_hook(uint32_t site_id, int saved_errno) RETURNGUARD_RUNTIME_NOEXCEPT;
+void __rg_fatal_hook(uint64_t site_id, int saved_errno) RETURNGUARD_RUNTIME_NOEXCEPT;
 
 #if defined(__cplusplus)
 }
@@ -82,7 +82,7 @@ void __rg_fatal_hook(uint32_t site_id, int saved_errno) RETURNGUARD_RUNTIME_NOEX
 namespace returnguard_runtime_detail {
 
 template <typename T>
-inline T check_negative(T result, uint32_t site_id) noexcept {
+inline T check_negative(T result, uint64_t site_id) noexcept {
     static_assert(std::is_integral_v<T> && std::is_signed_v<T>,
                   "ReturnGuard negative-result checks require a signed integer type");
     if (result < 0) {
@@ -93,7 +93,7 @@ inline T check_negative(T result, uint32_t site_id) noexcept {
 }
 
 template <typename T>
-inline T* check_null(T* result, uint32_t site_id) noexcept {
+inline T* check_null(T* result, uint64_t site_id) noexcept {
     if (result == nullptr) {
         const int saved_errno = errno;
         __rg_fatal(site_id, saved_errno);
@@ -104,9 +104,9 @@ inline T* check_null(T* result, uint32_t site_id) noexcept {
 } // namespace returnguard_runtime_detail
 
 #define __RG_CHECK_NEGATIVE(expression, site_id)                                             \
-    (::returnguard_runtime_detail::check_negative((expression), (uint32_t)(site_id)))
+    (::returnguard_runtime_detail::check_negative((expression), (uint64_t)(site_id)))
 #define __RG_CHECK_NULL(expression, site_id)                                                 \
-    (::returnguard_runtime_detail::check_null((expression), (uint32_t)(site_id)))
+    (::returnguard_runtime_detail::check_null((expression), (uint64_t)(site_id)))
 
 #elif defined(__GNUC__) || defined(__clang__)
 
@@ -121,7 +121,7 @@ inline T* check_null(T* result, uint32_t site_id) noexcept {
         __auto_type __rg_result = (expression);                                               \
         if (__rg_result < 0) {                                                               \
             const int __rg_saved_errno = errno;                                              \
-            __rg_fatal((uint32_t)(site_id), __rg_saved_errno);                               \
+            __rg_fatal((uint64_t)(site_id), __rg_saved_errno);                               \
         }                                                                                    \
         __rg_result;                                                                         \
     })
@@ -131,14 +131,14 @@ inline T* check_null(T* result, uint32_t site_id) noexcept {
         __auto_type __rg_result = (expression);                                               \
         if (__rg_result == NULL) {                                                           \
             const int __rg_saved_errno = errno;                                              \
-            __rg_fatal((uint32_t)(site_id), __rg_saved_errno);                               \
+            __rg_fatal((uint64_t)(site_id), __rg_saved_errno);                               \
         }                                                                                    \
         __rg_result;                                                                         \
     })
 
 #else
 
-static inline signed char __rg_check_negative_schar(signed char result, uint32_t site_id) {
+static inline signed char __rg_check_negative_schar(signed char result, uint64_t site_id) {
     if (result < 0) {
         const int saved_errno = errno;
         __rg_fatal(site_id, saved_errno);
@@ -146,7 +146,7 @@ static inline signed char __rg_check_negative_schar(signed char result, uint32_t
     return result;
 }
 
-static inline short __rg_check_negative_short(short result, uint32_t site_id) {
+static inline short __rg_check_negative_short(short result, uint64_t site_id) {
     if (result < 0) {
         const int saved_errno = errno;
         __rg_fatal(site_id, saved_errno);
@@ -154,7 +154,7 @@ static inline short __rg_check_negative_short(short result, uint32_t site_id) {
     return result;
 }
 
-static inline int __rg_check_negative_int(int result, uint32_t site_id) {
+static inline int __rg_check_negative_int(int result, uint64_t site_id) {
     if (result < 0) {
         const int saved_errno = errno;
         __rg_fatal(site_id, saved_errno);
@@ -162,7 +162,7 @@ static inline int __rg_check_negative_int(int result, uint32_t site_id) {
     return result;
 }
 
-static inline long __rg_check_negative_long(long result, uint32_t site_id) {
+static inline long __rg_check_negative_long(long result, uint64_t site_id) {
     if (result < 0) {
         const int saved_errno = errno;
         __rg_fatal(site_id, saved_errno);
@@ -170,7 +170,7 @@ static inline long __rg_check_negative_long(long result, uint32_t site_id) {
     return result;
 }
 
-static inline long long __rg_check_negative_llong(long long result, uint32_t site_id) {
+static inline long long __rg_check_negative_llong(long long result, uint64_t site_id) {
     if (result < 0) {
         const int saved_errno = errno;
         __rg_fatal(site_id, saved_errno);
@@ -178,7 +178,7 @@ static inline long long __rg_check_negative_llong(long long result, uint32_t sit
     return result;
 }
 
-static inline void* __rg_check_null_pointer(void* result, uint32_t site_id) {
+static inline void* __rg_check_null_pointer(void* result, uint64_t site_id) {
     if (result == NULL) {
         const int saved_errno = errno;
         __rg_fatal(site_id, saved_errno);
@@ -192,9 +192,9 @@ static inline void* __rg_check_null_pointer(void* result, uint32_t site_id) {
         short: __rg_check_negative_short,                                                    \
         int: __rg_check_negative_int,                                                        \
         long: __rg_check_negative_long,                                                      \
-        long long: __rg_check_negative_llong)((expression), (uint32_t)(site_id))
+        long long: __rg_check_negative_llong)((expression), (uint64_t)(site_id))
 
 #define __RG_CHECK_NULL(expression, site_id)                                                 \
-    __rg_check_null_pointer((void*)(expression), (uint32_t)(site_id))
+    __rg_check_null_pointer((void*)(expression), (uint64_t)(site_id))
 
 #endif
