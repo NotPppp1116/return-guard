@@ -10,8 +10,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Apply experimental analyzer patch
-        run: git apply --check experiments/hyprland-analysis-fixes.patch && git apply experiments/hyprland-analysis-fixes.patch
+      - name: Apply experimental analyzer and regression patches
+        run: |
+          git apply --check experiments/hyprland-analysis-fixes.patch
+          git apply experiments/hyprland-analysis-fixes.patch
+          git apply --check experiments/hyprland-analysis-tests.patch
+          git apply experiments/hyprland-analysis-tests.patch
 
       - name: Install LLVM 22
         run: |
