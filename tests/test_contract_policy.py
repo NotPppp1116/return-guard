@@ -124,6 +124,32 @@ def main() -> int:
                 custom_byte_count.stdout,
             )
 
+        custom_generic_byte_count = run(
+            [
+                str(tool),
+                "--no-color",
+                "--contract=vendor::transfer_like=byte-count:2",
+                str(source),
+                "--",
+                "-std=c++20",
+                "-I",
+                str(include),
+            ]
+        )
+        if custom_generic_byte_count.returncode != 0:
+            return fail(
+                "custom generic byte-count contract analysis failed",
+                custom_generic_byte_count.stdout,
+            )
+        if (
+            "possible short I/O transfer from 'vendor::transfer_like'"
+            not in custom_generic_byte_count.stdout
+        ):
+            return fail(
+                "custom generic byte-count contract used an imprecise diagnostic",
+                custom_generic_byte_count.stdout,
+            )
+
         invalid_byte_count = run(
             [
                 str(tool),

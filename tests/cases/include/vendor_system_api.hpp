@@ -11,4 +11,8 @@ inline long send_like(int, const char*, unsigned long count) {
     return static_cast<long>(count);
 }
 
+inline long transfer_like(int, const char*, unsigned long count) {
+    return static_cast<long>(count);
+}
+
 } // namespace vendor

@@ -34,6 +34,13 @@ int configured_byte_count_contract_sample(int fd, const char* buffer, unsigned l
     return 0;
 }
 
+int configured_generic_byte_count_contract_sample(int fd, const char* buffer, unsigned long size) {
+    if (vendor::transfer_like(fd, buffer, size) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 int configured_null_contract_sample(void) {
     return null_factory()->value;
 }

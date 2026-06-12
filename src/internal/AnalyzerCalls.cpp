@@ -469,15 +469,31 @@ bool is_read_like_byte_count_function(const clang::FunctionDecl* function) {
     return names.contains(function->getName().str());
 }
 
+std::string short_transfer_kind(const clang::FunctionDecl* function) {
+    if (function == nullptr || function->getIdentifier() == nullptr) {
+        return "I/O transfer";
+    }
+
+    const llvm::StringRef name = function->getName();
+    if (is_read_like_byte_count_function(function) ||
+        starts_with_any(name, {"read", "recv", "pread"})) {
+        return "read";
+    }
+    if (starts_with_any(name, {"write", "send", "pwrite"})) {
+        return "write";
+    }
+    return "I/O transfer";
+}
+
 CheckResult short_byte_count_result(const clang::CallExpr* call) {
     CheckResult result;
     result.kind = HandlingKind::PartiallyChecked;
     const clang::FunctionDecl* function = call == nullptr ? nullptr : call->getDirectCallee();
     const std::string name =
         function == nullptr ? "<indirect function>" : function->getQualifiedNameAsString();
-    const bool read_like = is_read_like_byte_count_function(function);
-    const std::string transfer_kind = read_like ? "read" : "write";
-    const std::string transfer_plural = read_like ? "reads" : "writes";
+    const std::string transfer_kind = short_transfer_kind(function);
+    const std::string transfer_plural =
+        transfer_kind == "read" ? "reads" : (transfer_kind == "write" ? "writes" : "transfers");
     result.message = "possible short " + transfer_kind + " from '" + name +
                      "': positive return may be smaller than requested byte count";
     result.detail =
