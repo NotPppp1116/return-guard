@@ -1,0 +1,105 @@
+diff --git a/src/internal/AnalyzerSafety.cpp b/src/internal/AnalyzerSafety.cpp
+--- a/src/internal/AnalyzerSafety.cpp
++++ b/src/internal/AnalyzerSafety.cpp
+@@ -7,6 +7,7 @@
+ #include <returnguard/Options.hpp>
+ 
+ #include <clang/AST/ASTContext.h>
++#include <clang/AST/ParentMapContext.h>
+ #include <clang/AST/Decl.h>
+ #include <clang/AST/Expr.h>
+ #include <clang/AST/ExprCXX.h>
+@@ -662,6 +663,89 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
+     }
+ 
+   private:
++    const clang::CXXForRangeStmt* enclosing_range_for(const clang::VarDecl* variable) {
++        if (variable == nullptr || !variable->isCXXForRangeDecl())
++            return nullptr;
++
++        const auto parents = context_.getParents(*variable);
++        for (const clang::DynTypedNode& parent : parents) {
++            if (const auto* range = parent.get<clang::CXXForRangeStmt>())
++                return range;
++            if (const auto* declaration_statement = parent.get<clang::DeclStmt>()) {
++                const auto grandparents = context_.getParents(*declaration_statement);
++                for (const clang::DynTypedNode& grandparent : grandparents) {
++                    if (const auto* range = grandparent.get<clang::CXXForRangeStmt>())
++                        return range;
++                }
++            }
++        }
++        return nullptr;
++    }
++
++    bool expression_has_current_frame_storage(const clang::Expr* expression) {
++        expression = strip_expr(expression);
++        if (expression == nullptr)
++            return false;
++
++        if (llvm::isa<clang::CXXThisExpr>(expression))
++            return false;
++
++        if (const auto* reference = llvm::dyn_cast<clang::DeclRefExpr>(expression)) {
++            const auto* variable = llvm::dyn_cast<clang::VarDecl>(reference->getDecl());
++            if (variable == nullptr || llvm::isa<clang::ParmVarDecl>(variable) ||
++                variable->isStaticLocal())
++                return false;
++            if (variable->getType()->isReferenceType())
++                return reference_denotes_current_frame_storage(variable);
++            return variable->isLocalVarDecl();
++        }
++
++        if (const auto* member = llvm::dyn_cast<clang::MemberExpr>(expression)) {
++            return !member->isArrow() &&
++                   expression_has_current_frame_storage(member->getBase());
++        }
++
++        if (const auto* conditional = llvm::dyn_cast<clang::ConditionalOperator>(expression)) {
++            return expression_has_current_frame_storage(conditional->getTrueExpr()) ||
++                   expression_has_current_frame_storage(conditional->getFalseExpr());
++        }
++
++        if (const auto* conditional = llvm::dyn_cast<clang::BinaryConditionalOperator>(expression)) {
++            return expression_has_current_frame_storage(conditional->getCommon()) ||
++                   expression_has_current_frame_storage(conditional->getFalseExpr());
++        }
++
++        if (const auto* cleanup = llvm::dyn_cast<clang::ExprWithCleanups>(expression))
++            return expression_has_current_frame_storage(cleanup->getSubExpr());
++        if (const auto* temporary = llvm::dyn_cast<clang::MaterializeTemporaryExpr>(expression))
++            return expression_has_current_frame_storage(temporary->getSubExpr());
++        if (const auto* temporary = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(expression))
++            return expression_has_current_frame_storage(temporary->getSubExpr());
++
++        if (const auto* call = llvm::dyn_cast<clang::CallExpr>(expression))
++            return !call->getType()->isReferenceType();
++
++        return llvm::isa<clang::CXXConstructExpr, clang::InitListExpr>(expression);
++    }
++
++    bool reference_denotes_current_frame_storage(const clang::VarDecl* variable) {
++        if (variable == nullptr || !variable->getType()->isReferenceType())
++            return false;
++        if (const clang::CXXForRangeStmt* range = enclosing_range_for(variable))
++            return expression_has_current_frame_storage(range->getRangeInit());
++        return variable->getInit() != nullptr &&
++               expression_has_current_frame_storage(variable->getInit());
++    }
++
+     bool is_stack_address(const clang::Expr* expression) {
+         expression = expression->IgnoreParenCasts();
+         if (expression == nullptr)
+@@ -669,12 +753,7 @@ class SafetyVisitor : public clang::RecursiveASTVisitor<SafetyVisitor> {
+ 
+         if (const auto* unary = llvm::dyn_cast<clang::UnaryOperator>(expression)) {
+             if (unary->getOpcode() == clang::UO_AddrOf) {
+-                const clang::Expr* sub = unary->getSubExpr()->IgnoreParenCasts();
+-                if (const auto* ref = llvm::dyn_cast<clang::DeclRefExpr>(sub)) {
+-                    if (const auto* var = llvm::dyn_cast<clang::VarDecl>(ref->getDecl())) {
+-                        return var->isLocalVarDecl() && !var->isStaticLocal();
+-                    }
+-                }
++                return expression_has_current_frame_storage(unary->getSubExpr());
+             }
+         }

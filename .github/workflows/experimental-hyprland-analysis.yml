@@ -1,0 +1,72 @@
+name: experimental-hyprland-analysis
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-experimental-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Apply experimental analyzer change and regression cases
+        run: python3 experiments/apply_hyprland_lifetime_fix.py
+
+      - name: Install LLVM 22
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22 all
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build python3
+
+      - name: Configure
+        run: |
+          LLVM_CMAKE_DIR="$(llvm-config-22 --cmakedir)"
+          CLANG_CMAKE_DIR="$(dirname "${LLVM_CMAKE_DIR}")/clang"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_CXX_COMPILER=clang++-22 \
+            -DLLVM_DIR="${LLVM_CMAKE_DIR}" \
+            -DClang_DIR="${CLANG_CMAKE_DIR}" \
+            -DRETURNGUARD_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Verify real stack escapes remain diagnosed
+        shell: bash
+        run: |
+          cat > /tmp/returnguard-range-negative.cpp <<'CPP'
+          struct Item {
+              int value;
+          };
+
+          int* reference_to_local() {
+              int local = 0;
+              int& alias = local;
+              return &alias;
+          }
+
+          Item* element_of_local_range() {
+              Item items[2]{};
+              for (auto& item : items)
+                  return &item;
+              return nullptr;
+          }
+          CPP
+
+          set +e
+          output="$(./build/returnguard --mode=practical --fail-on-diagnostics \
+              /tmp/returnguard-range-negative.cpp -- -std=c++20 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -eq 1
+          test "$(grep -c 'address of stack-allocated variable returned' <<<"$output")" -eq 2
+
+      - name: Run full test suite
+        run: ctest --test-dir build --output-on-failure
