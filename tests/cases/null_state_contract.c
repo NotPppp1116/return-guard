@@ -1,4 +1,5 @@
 #include <returnguard/Contracts.h>
+#include <string.h>
 
 struct item {
     int value;
@@ -21,4 +22,40 @@ int checked_configured_failure_contract(void) {
         return 0;
     }
     return item->value;
+}
+
+int unchecked_strchr_contract(const char* text) {
+    return strchr(text, '=')[0];
+}
+
+int checked_strchr_contract(const char* text) {
+    char* separator = strchr(text, '=');
+    if (separator == 0) {
+        return 0;
+    }
+    return separator[0];
+}
+
+int unchecked_strstr_contract(const char* text) {
+    return strstr(text, "needle")[0];
+}
+
+int checked_strstr_contract(const char* text) {
+    char* needle = strstr(text, "needle");
+    if (needle == 0) {
+        return 0;
+    }
+    return needle[0];
+}
+
+int unchecked_memchr_contract(const char* text, unsigned long size) {
+    return ((char*)memchr(text, '\n', size))[0];
+}
+
+int checked_memchr_contract(const char* text, unsigned long size) {
+    char* newline = (char*)memchr(text, '\n', size);
+    if (newline == 0) {
+        return 0;
+    }
+    return newline[0];
 }

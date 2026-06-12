@@ -157,9 +157,15 @@ add_returnguard_test(
     "is dereferenced without a prior null check"
     --expect "pointer returned here is marked nullable")
 add_returnguard_test(
-    returnguard.null_state_contract null_state_contract.c practical 2
+    returnguard.null_state_contract null_state_contract.c practical 5
     "potentially-null return value"
-    --tool-arg=--contract=configured_failure=null)
+    --tool-arg=--contract=configured_failure=null
+    --expect "return value of 'strchr'"
+    --expect "return value of 'strstr'"
+    --expect "return value of 'memchr'"
+    --reject "checked_strchr_contract"
+    --reject "checked_strstr_contract"
+    --reject "checked_memchr_contract")
 add_returnguard_test(
     returnguard.null_state_inference null_state_inference.c practical 2
     "is dereferenced without a prior null check")
