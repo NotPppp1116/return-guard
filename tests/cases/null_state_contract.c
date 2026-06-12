@@ -1,5 +1,7 @@
 #include <returnguard/Contracts.h>
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 struct item {
     int value;
@@ -58,4 +60,28 @@ int checked_memchr_contract(const char* text, unsigned long size) {
         return 0;
     }
     return newline[0];
+}
+
+int unchecked_fgets_contract(char* buffer, int size, FILE* file) {
+    return fgets(buffer, size, file)[0];
+}
+
+int checked_fgets_contract(char* buffer, int size, FILE* file) {
+    char* line = fgets(buffer, size, file);
+    if (line == 0) {
+        return 0;
+    }
+    return line[0];
+}
+
+int unchecked_getcwd_contract(char* buffer, unsigned long size) {
+    return getcwd(buffer, size)[0];
+}
+
+int checked_getcwd_contract(char* buffer, unsigned long size) {
+    char* path = getcwd(buffer, size);
+    if (path == 0) {
+        return 0;
+    }
+    return path[0];
 }
