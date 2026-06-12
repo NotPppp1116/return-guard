@@ -41,6 +41,19 @@ int configured_generic_byte_count_contract_sample(int fd, const char* buffer, un
     return 0;
 }
 
+int configured_nonzero_contract_sample(void) {
+    int status = vendor::try_lock();
+    return status + 1;
+}
+
+int checked_configured_nonzero_contract_sample(void) {
+    int status = vendor::try_lock();
+    if (status) {
+        return status;
+    }
+    return 0;
+}
+
 int configured_null_contract_sample(void) {
     return null_factory()->value;
 }

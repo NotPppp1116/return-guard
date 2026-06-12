@@ -223,6 +223,7 @@ conservative and focus on stable C, POSIX, stdio, and similar system APIs:
 ```sh
 returnguard \
     --contract=project_open=negative \
+    --contract=project_try_lock=nonzero \
     --contract=Project::make_handle=null \
     file.c -- -std=c17
 ```
@@ -232,6 +233,7 @@ For larger projects, put one contract per line in a file:
 ```text
 # contracts.rg
 project_open=negative
+project_try_lock=nonzero
 Project::make_handle=null
 ```
 
@@ -247,6 +249,7 @@ custom lifetime functions, use `--function-config`:
 ```text
 # returnguard.rg
 contract project_open negative
+contract project_try_lock nonzero
 contract Project::make_handle null
 lifetime project_alloc alloc
 lifetime project_realloc realloc
@@ -257,10 +260,12 @@ lifetime project_free free
 returnguard --function-config=returnguard.rg file.c -- -std=c17
 ```
 
-Use `negative` for signed integer APIs that fail with a value below zero, and
-`null` for pointer APIs where `NULL` means failure. Source annotations with
-`RETURNGUARD_FAILS_NULL` and `RETURNGUARD_FAILS_NEGATIVE` still work and take
-precedence when you control the declaration.
+Use `negative` for signed integer APIs that fail with a value below zero,
+`nonzero` for APIs where zero means success and any nonzero value is failure
+or an error code, and `null` for pointer APIs where `NULL` means failure.
+Source annotations with `RETURNGUARD_FAILS_NULL`,
+`RETURNGUARD_FAILS_NEGATIVE`, and `RETURNGUARD_FAILS_NONZERO` still work and
+take precedence when you control the declaration.
 
 ## Important limitations
 

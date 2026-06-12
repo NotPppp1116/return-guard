@@ -18,6 +18,12 @@ bool same_value(const llvm::APSInt& lhs, const llvm::APSInt& rhs) {
     return llvm::APSInt::isSameValue(lhs, rhs);
 }
 
+bool is_failure_value(const DomainValue& value) {
+    return std::any_of(value.labels.begin(), value.labels.end(), [](const std::string& label) {
+        return label.find("failure") != std::string::npos;
+    });
+}
+
 void add_domain_value(Domain& domain, llvm::APSInt value, std::string label) {
     for (DomainValue& existing : domain.values) {
         if (!same_value(existing.value, value)) {

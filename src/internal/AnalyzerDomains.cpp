@@ -40,6 +40,16 @@ Domain negative_contract_domain(clang::QualType type) {
     return domain;
 }
 
+Domain nonzero_contract_domain(clang::QualType type) {
+    Domain domain;
+    domain.finite = true;
+    domain.fallible_contract = true;
+    domain.type_name = type.getAsString();
+    add_domain_value(domain, signed_value(1), "failure (!=0)");
+    add_domain_value(domain, signed_value(0), "success (0)");
+    return domain;
+}
+
 } // namespace
 
 Domain Analyzer::enum_domain(const clang::EnumDecl* declaration) const {
@@ -146,9 +156,12 @@ Domain Analyzer::function_domain(const clang::FunctionDecl* function,
     }
 
     Domain by_type = type_domain(function->getReturnType());
-    if (failure_contract(*function, source_manager_) == FailurePredicate::Negative &&
-        function->getReturnType()->isSignedIntegerType()) {
+    const std::optional<FailurePredicate> contract = failure_contract(*function, source_manager_);
+    if (contract == FailurePredicate::Negative && function->getReturnType()->isSignedIntegerType()) {
         by_type = negative_contract_domain(function->getReturnType());
+    } else if (contract == FailurePredicate::NonZero &&
+               function->getReturnType()->isIntegerType()) {
+        by_type = nonzero_contract_domain(function->getReturnType());
     }
 
     Domain annotated = annotation_domain(function);

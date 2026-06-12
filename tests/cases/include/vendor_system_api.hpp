@@ -15,4 +15,8 @@ inline long transfer_like(int, const char*, unsigned long count) {
     return static_cast<long>(count);
 }
 
+inline int try_lock() {
+    return 1;
+}
+
 } // namespace vendor

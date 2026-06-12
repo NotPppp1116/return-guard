@@ -12,6 +12,7 @@ namespace returnguard::internal {
 enum class FailurePredicate {
     Null,
     Negative,
+    NonZero,
 };
 
 [[nodiscard]] std::optional<FailurePredicate>

@@ -80,6 +80,10 @@ std::optional<FailurePredicate> annotation_contract(const clang::FunctionDecl& f
             if (annotation == "returnguard.failure:negative") {
                 return FailurePredicate::Negative;
             }
+
+            if (annotation == "returnguard.failure:nonzero") {
+                return FailurePredicate::NonZero;
+            }
         }
     }
 
@@ -93,6 +97,9 @@ std::optional<FailurePredicate> parse_predicate(llvm::StringRef value) {
     }
     if (value == "negative") {
         return FailurePredicate::Negative;
+    }
+    if (value == "nonzero" || value == "non-zero") {
+        return FailurePredicate::NonZero;
     }
     return std::nullopt;
 }
@@ -279,6 +286,27 @@ std::optional<FailurePredicate> failure_contract(const clang::FunctionDecl& func
                                                            "rename",
                                                        })) {
         return FailurePredicate::Negative;
+    }
+
+    if (global && has_any_name(function, {
+                                             "pthread_create",
+                                             "pthread_join",
+                                             "pthread_detach",
+                                             "pthread_mutex_lock",
+                                             "pthread_mutex_trylock",
+                                             "pthread_mutex_unlock",
+                                             "pthread_rwlock_rdlock",
+                                             "pthread_rwlock_wrlock",
+                                             "pthread_cond_wait",
+                                             "pthread_cond_timedwait",
+                                             "pthread_sigmask",
+                                             "getpwnam_r",
+                                             "getpwuid_r",
+                                             "getgrnam_r",
+                                             "getgrgid_r",
+                                             "raise",
+                                         })) {
+        return FailurePredicate::NonZero;
     }
 
     if (global && has_any_name(function, {

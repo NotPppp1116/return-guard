@@ -11,11 +11,35 @@
 #include <clang/AST/Stmt.h>
 #include <llvm/Support/Casting.h>
 
-#include <algorithm>
 #include <optional>
 #include <vector>
 
 namespace returnguard::internal {
+namespace {
+
+template <typename Target>
+bool exits_on_all_failure_values(const clang::IfStmt* statement, const Target& target,
+                                 const Domain& domain, Analyzer& analyzer) {
+    if (statement == nullptr || !domain.fallible_contract || !domain.finite ||
+        !statement_exits(statement->getThen())) {
+        return false;
+    }
+
+    bool saw_failure = false;
+    for (const DomainValue& value : domain.values) {
+        if (!is_failure_value(value)) {
+            continue;
+        }
+        saw_failure = true;
+        if (evaluate_condition_for_value(statement->getCond(), target, value.value, analyzer) !=
+            Truth::True) {
+            return false;
+        }
+    }
+    return saw_failure;
+}
+
+} // namespace
 
 CheckResult Analyzer::analyze_switch(const clang::SwitchStmt* statement,
                                      const Domain& domain) const {
@@ -93,8 +117,12 @@ CheckResult Analyzer::analyze_if_chain(const clang::IfStmt* statement,
     }
 
     if (variable != nullptr &&
-        is_guard_condition(statement->getCond(), variable, const_cast<Analyzer&>(*this)) &&
-        statement_exits(statement->getThen())) {
+        (domain.fallible_contract
+             ? exits_on_all_failure_values(statement, variable, domain,
+                                           const_cast<Analyzer&>(*this))
+             : (is_guard_condition(statement->getCond(), variable,
+                                   const_cast<Analyzer&>(*this)) &&
+                statement_exits(statement->getThen())))) {
         result.kind = HandlingKind::ExhaustivelyChecked;
         return result;
     }
@@ -203,8 +231,10 @@ CheckResult analyze_direct_if(const clang::IfStmt* statement, const clang::Expr*
         return result;
     }
 
-    if (is_guard_condition(statement->getCond(), target, analyzer) &&
-        statement_exits(statement->getThen())) {
+    if (domain.fallible_contract
+            ? exits_on_all_failure_values(statement, target, domain, analyzer)
+            : (is_guard_condition(statement->getCond(), target, analyzer) &&
+               statement_exits(statement->getThen()))) {
         CheckResult result;
         result.kind = HandlingKind::ExhaustivelyChecked;
         return result;

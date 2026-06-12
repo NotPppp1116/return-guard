@@ -221,6 +221,27 @@ add_returnguard_test(
     --reject "checked_ioctl_contract"
     --reject "checked_fcntl_contract")
 add_returnguard_test(
+    returnguard.nonzero_contracts nonzero_contracts.c practical 8
+    "failure (!=0)"
+    --tool-arg=--contract=configured_nonzero_status=nonzero
+    --expect "return value of 'pthread_create'"
+    --expect "return value of 'pthread_mutex_lock'"
+    --expect "return value of 'getpwnam_r'"
+    --expect "return value of 'getgrgid_r'"
+    --expect "return value of 'raise'"
+    --expect "return value of 'annotated_nonzero_status'"
+    --expect "return value of 'configured_nonzero_status'"
+    --expect "weak_negative_pthread_create_contract"
+    --reject "checked_pthread_create_contract"
+    --reject "checked_bare_pthread_create_contract"
+    --reject "checked_direct_mutex_lock_contract"
+    --reject "checked_bare_direct_mutex_unlock_contract"
+    --reject "checked_getpwnam_r_contract"
+    --reject "checked_getgrgid_r_contract"
+    --reject "checked_raise_contract"
+    --reject "checked_annotated_nonzero_contract"
+    --reject "checked_configured_nonzero_contract")
+add_returnguard_test(
     returnguard.null_state_inference null_state_inference.c practical 2
     "is dereferenced without a prior null check")
 add_returnguard_test(

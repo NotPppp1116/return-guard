@@ -64,6 +64,8 @@ def main() -> int:
         return fail("vendor::open inherited a global POSIX contract", base.stdout)
     if "possible short write from 'vendor::send_like'" in base.stdout:
         return fail("vendor::send_like inherited a byte-count contract", base.stdout)
+    if "return value of 'vendor::try_lock'" in base.stdout:
+        return fail("vendor::try_lock inherited a nonzero contract", base.stdout)
 
     with tempfile.TemporaryDirectory(prefix="returnguard-contract-policy-") as name:
         directory = pathlib.Path(name)
@@ -83,6 +85,25 @@ def main() -> int:
             return fail("custom contract analysis failed", custom.stdout)
         if "return value of 'vendor::open' is consumed but not verified" not in custom.stdout:
             return fail("custom CLI contract did not diagnose vendor::open", custom.stdout)
+
+        custom_nonzero = run(
+            [
+                str(tool),
+                "--no-color",
+                "--contract=vendor::try_lock=nonzero",
+                str(source),
+                "--",
+                "-std=c++20",
+                "-I",
+                str(include),
+            ]
+        )
+        if custom_nonzero.returncode != 0:
+            return fail("custom nonzero contract analysis failed", custom_nonzero.stdout)
+        if "return value of 'vendor::try_lock' is consumed but not verified" not in custom_nonzero.stdout:
+            return fail("custom nonzero contract did not diagnose vendor::try_lock", custom_nonzero.stdout)
+        if "checked_configured_nonzero_contract_sample" in custom_nonzero.stdout:
+            return fail("custom nonzero contract rejected a bare status guard", custom_nonzero.stdout)
 
         custom_null = run(
             [
@@ -166,7 +187,10 @@ def main() -> int:
             return fail("invalid byte-count contract was accepted", invalid_byte_count.stdout)
 
         contract_file = directory / "contracts.txt"
-        contract_file.write_text("# project contracts\nvendor::open=negative\n", encoding="utf-8")
+        contract_file.write_text(
+            "# project contracts\nvendor::open=negative\nvendor::try_lock=nonzero\n",
+            encoding="utf-8",
+        )
         from_file = run(
             [
                 str(tool),
@@ -183,11 +207,14 @@ def main() -> int:
             return fail("contract-file analysis failed", from_file.stdout)
         if "return value of 'vendor::open' is consumed but not verified" not in from_file.stdout:
             return fail("contract file did not diagnose vendor::open", from_file.stdout)
+        if "return value of 'vendor::try_lock' is consumed but not verified" not in from_file.stdout:
+            return fail("contract file did not diagnose vendor::try_lock", from_file.stdout)
 
         function_config = directory / "function-config.rg"
         function_config.write_text(
             "# combined function policy\n"
             "contract vendor::open negative\n"
+            "contract vendor::try_lock nonzero\n"
             "contract vendor::send_like byte-count:2\n",
             encoding="utf-8",
         )
@@ -212,6 +239,8 @@ def main() -> int:
                 "function config did not diagnose vendor::send_like",
                 from_config.stdout,
             )
+        if "return value of 'vendor::try_lock' is consumed but not verified" not in from_config.stdout:
+            return fail("function config did not diagnose vendor::try_lock", from_config.stdout)
 
     return 0
 
