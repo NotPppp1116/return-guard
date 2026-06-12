@@ -85,3 +85,27 @@ int checked_getcwd_contract(char* buffer, unsigned long size) {
     }
     return path[0];
 }
+
+int unchecked_ttyname_contract(int fd) {
+    return ttyname(fd)[0];
+}
+
+int checked_ttyname_contract(int fd) {
+    char* name = ttyname(fd);
+    if (name == 0) {
+        return 0;
+    }
+    return name[0];
+}
+
+int unchecked_getlogin_contract(void) {
+    return getlogin()[0];
+}
+
+int checked_getlogin_contract(void) {
+    char* name = getlogin();
+    if (name == 0) {
+        return 0;
+    }
+    return name[0];
+}

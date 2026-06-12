@@ -76,7 +76,7 @@ add_returnguard_test(returnguard.ignored ignored.c ignored-only 1 "return value 
 add_returnguard_test(returnguard.must_check must_check.c practical 2 "must_check_status")
 add_returnguard_test(returnguard.nodiscard nodiscard.cpp practical 1 "nodiscard_status")
 add_returnguard_test(
-    returnguard.short_write short_write.c practical 12 "possible short"
+    returnguard.short_write short_write.c practical 13 "possible short"
     --expect "positive return may be smaller than requested byte count"
     --expect "checking only for a negative return misses partial writes"
     --expect "checking only for a negative return misses partial reads"
@@ -87,12 +87,14 @@ add_returnguard_test(
     --expect "direct_pread_negative_only"
     --expect "direct_recv_negative_only"
     --expect "direct_recvfrom_negative_only"
+    --expect "direct_getrandom_negative_only"
     --expect "assigned_write_negative_only"
     --expect "assignment_condition_write_negative_only"
     --expect "conditional_write_negative_only"
     --expect "conditional_assignment_write_negative_only"
     --reject "count_checked_write"
     --reject "count_checked_read"
+    --reject "count_checked_getrandom"
     --reject "count_checked_assignment"
     --reject "count_checked_assignment_condition"
     --reject "count_checked_conditional"
@@ -157,7 +159,7 @@ add_returnguard_test(
     "is dereferenced without a prior null check"
     --expect "pointer returned here is marked nullable")
 add_returnguard_test(
-    returnguard.null_state_contract null_state_contract.c practical 7
+    returnguard.null_state_contract null_state_contract.c practical 9
     "potentially-null return value"
     --tool-arg=--contract=configured_failure=null
     --expect "return value of 'strchr'"
@@ -165,20 +167,59 @@ add_returnguard_test(
     --expect "return value of 'memchr'"
     --expect "return value of 'fgets'"
     --expect "return value of 'getcwd'"
+    --expect "return value of 'ttyname'"
+    --expect "return value of 'getlogin'"
     --reject "checked_strchr_contract"
     --reject "checked_strstr_contract"
     --reject "checked_memchr_contract"
     --reject "checked_fgets_contract"
-    --reject "checked_getcwd_contract")
+    --reject "checked_getcwd_contract"
+    --reject "checked_ttyname_contract"
+    --reject "checked_getlogin_contract")
 add_returnguard_test(
-    returnguard.posix_negative_contracts posix_negative_contracts.c practical 3
+    returnguard.posix_negative_contracts posix_negative_contracts.c practical 23
     "consumed but not verified"
     --expect "return value of 'getline'"
     --expect "return value of 'getdelim'"
     --expect "return value of 'lseek'"
+    --expect "return value of 'fileno'"
+    --expect "return value of 'dirfd'"
+    --expect "return value of 'ftell'"
+    --expect "return value of 'mkstemp'"
+    --expect "return value of 'system'"
+    --expect "return value of 'setuid'"
+    --expect "return value of 'chroot'"
+    --expect "return value of 'prctl'"
+    --expect "return value of 'mprotect'"
+    --expect "return value of 'mlockall'"
+    --expect "return value of 'shm_open'"
+    --expect "return value of 'fork'"
+    --expect "return value of 'execve'"
+    --expect "return value of 'waitpid'"
+    --expect "return value of 'getentropy'"
+    --expect "return value of 'kill'"
+    --expect "return value of 'sigaction'"
+    --expect "return value of 'ioctl'"
+    --expect "return value of 'fcntl'"
+    --expect "return value of 'flock'"
     --reject "checked_getline_contract"
     --reject "checked_getdelim_contract"
-    --reject "checked_lseek_contract")
+    --reject "checked_lseek_contract"
+    --reject "checked_fileno_contract"
+    --reject "checked_dirfd_contract"
+    --reject "checked_ftell_contract"
+    --reject "checked_mkstemp_contract"
+    --reject "checked_system_contract"
+    --reject "checked_setuid_contract"
+    --reject "checked_chroot_contract"
+    --reject "checked_mprotect_contract"
+    --reject "checked_shm_open_contract"
+    --reject "checked_fork_contract"
+    --reject "checked_waitpid_contract"
+    --reject "checked_getentropy_contract"
+    --reject "checked_kill_contract"
+    --reject "checked_ioctl_contract"
+    --reject "checked_fcntl_contract")
 add_returnguard_test(
     returnguard.null_state_inference null_state_inference.c practical 2
     "is dereferenced without a prior null check")

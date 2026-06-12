@@ -460,6 +460,7 @@ bool is_read_like_byte_count_function(const clang::FunctionDecl* function) {
     }
 
     static const std::unordered_set<std::string> names = {
+        "getrandom",
         "pread",
         "pread64",
         "read",
