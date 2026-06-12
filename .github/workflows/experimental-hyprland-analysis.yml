@@ -1,0 +1,41 @@
+name: experimental-hyprland-analysis
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-experimental-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Apply experimental analyzer patch
+        run: git apply --check experiments/hyprland-analysis-fixes.patch && git apply experiments/hyprland-analysis-fixes.patch
+
+      - name: Install LLVM 22
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22 all
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build python3
+
+      - name: Configure
+        run: |
+          LLVM_CMAKE_DIR="$(llvm-config-22 --cmakedir)"
+          CLANG_CMAKE_DIR="$(dirname "${LLVM_CMAKE_DIR}")/clang"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_CXX_COMPILER=clang++-22 \
+            -DLLVM_DIR="${LLVM_CMAKE_DIR}" \
+            -DClang_DIR="${CLANG_CMAKE_DIR}" \
+            -DRETURNGUARD_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
