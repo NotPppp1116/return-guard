@@ -397,7 +397,7 @@ bool Analyzer::call_is_discarded_expression(const clang::CallExpr* call) const {
 }
 
 bool Analyzer::call_is_operator(const clang::CallExpr* call) const {
-    if (llvm::isa<clang::CXXOperatorCallExpr>(call)) {
+    if (llvm::isa<clang::CXXOperatorCallExpr, clang::UserDefinedLiteral>(call)) {
         return true;
     }
     const auto* method = llvm::dyn_cast_or_null<clang::CXXMethodDecl>(

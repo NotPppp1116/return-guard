@@ -185,12 +185,27 @@ bool starts_with_any(llvm::StringRef value, std::initializer_list<llvm::StringRe
     return false;
 }
 
+bool ends_with_any(llvm::StringRef value, std::initializer_list<llvm::StringRef> suffixes) {
+    for (llvm::StringRef suffix : suffixes) {
+        if (value.ends_with(suffix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool is_common_value_helper_name(llvm::StringRef name) {
     static const std::unordered_set<std::string> exact_names = {
+        "__ctype_b_loc",
+        "__ctype_tolower_loc",
+        "__ctype_toupper_loc",
         "at",
         "back",
         "begin",
         "c_str",
+        "chr",
+        "compare",
+        "count",
         "copy",
         "data",
         "distance",
@@ -199,26 +214,66 @@ bool is_common_value_helper_name(llvm::StringRef name) {
         "ERR_CAST",
         "ERR_PTR",
         "extents",
+        "ferror",
         "front",
         "get",
         "IS_ERR",
         "IS_ERR_OR_NULL",
+        "isalnum",
+        "isalpha",
+        "isascii",
+        "isblank",
+        "iscntrl",
+        "isdigit",
+        "isgraph",
+        "islower",
+        "isprint",
+        "ispunct",
+        "isspace",
+        "isupper",
+        "isxdigit",
         "length",
         "lock",
         "makeShared",
         "makeUnique",
+        "message",
+        "memchr",
+        "memcmp",
+        "next",
+        "rawmemchr",
         "PTR_ERR",
         "PTR_ERR_OR_ZERO",
+        "rand",
         "rc",
         "rbegin",
         "rend",
         "sc",
         "size",
+        "strcasestr",
+        "strchr",
+        "strcmp",
+        "strcasecmp",
         "str",
+        "strhash",
+        "strlen",
+        "strncasecmp",
+        "strncmp",
+        "strnlen",
+        "strrchr",
+        "strstr",
+        "str_ends_with",
+        "str_get",
+        "str_new",
         "string",
+        "protocol",
+        "specName",
+        "specVer",
+        "tolower",
+        "toupper",
         "value",
         "valueOrDefault",
         "value_or",
+        "xmalloc",
     };
     return exact_names.contains(name.str());
 }
@@ -255,6 +310,12 @@ bool is_common_value_helper(const clang::FunctionDecl* function) {
                                          "should",
                                          "to",
                                      });
+    }
+    if (starts_with_any(name, {"is_", "has_", "can_", "should_"}) ||
+        ends_with_any(name, {"_empty", "_enabled", "_next", "_valid"}) ||
+        name.starts_with("in_") || name.contains("_get_") || name.contains("_has_") ||
+        name.contains("_is_")) {
+        return true;
     }
     return false;
 }
